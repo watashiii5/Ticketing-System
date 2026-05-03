@@ -419,10 +419,10 @@ app.get("/", async (req, res, next) => {
       FROM companies c ORDER BY c.created_at DESC
     `).all();
 
-    const totalTickets = await db.prepare("SELECT COUNT(*) as cnt FROM tickets").get().cnt;
-    const resolvedTickets = await db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get().cnt;
-    const totalUsers = await db.prepare("SELECT COUNT(*) as cnt FROM users").get().cnt;
-    const freeTrialUsers = await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > datetime('now')").get().cnt;
+    const totalTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets").get())).cnt;
+    const resolvedTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get())).cnt;
+    const totalUsers = ((await db.prepare("SELECT COUNT(*) as cnt FROM users").get())).cnt;
+    const freeTrialUsers = ((await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > NOW()::text").get())).cnt;
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
     
@@ -1820,13 +1820,13 @@ function getPlanLimits(planCode) {
 }
 
 async function getCompanyAgentCount(companyId) {
-  return await db.prepare("SELECT COUNT(*) as count FROM users WHERE company_id = ? AND role = 'agent'").get(companyId).count;
+  return (await db.prepare("SELECT COUNT(*) as count FROM users WHERE company_id = ? AND role = 'agent'").get(companyId)).count;
 }
 
 async function getCompanyTicketsThisMonth(companyId) {
   const now = new Date();
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  return await db.prepare("SELECT COUNT(*) as count FROM tickets WHERE company_id = ? AND created_at >= ?").get(companyId, firstDay).count;
+  return (await db.prepare("SELECT COUNT(*) as count FROM tickets WHERE company_id = ? AND created_at >= ?").get(companyId, firstDay)).count;
 }
 
 function getEffectivePlan(company) {
