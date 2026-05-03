@@ -24,11 +24,16 @@ app.use(
   })
 );
 app.use("/static", express.static(path.join(__dirname, "..", "public")));
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+const uploadsDir = path.join(__dirname, "..", "uploads");
+const fs = require("fs");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadsDir));
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: path.join(__dirname, "..", "uploads"),
+    destination: uploadsDir,
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname);
       const name = `${crypto.randomBytes(12).toString("hex")}${ext}`;
