@@ -23,8 +23,13 @@ app.use(
     },
   })
 );
-app.use("/static", express.static(path.join(__dirname, "..", "public")));
-const uploadsDir = path.join(__dirname, "..", "uploads");
+app.use(
+  "/static",
+  express.static(path.join(__dirname, "..", "public"), { maxAge: "7d", etag: true })
+);
+const uploadsDir = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(__dirname, "..", "uploads");
 const fs = require("fs");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -1452,7 +1457,8 @@ async function renderHome(
               <span class="badge status ${ticket.status}">${formatStatus(ticket.status)}</span>
               <span class="badge priority ${ticket.priority}">${ticket.priority}</span>
               ${renderPriorityMeta(ticket.priority_confidence, ticket.priority_reason)}
-              <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
+                ${renderSlaBadge(ticket.sla_due_at)}
+                <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
             </div>
           </div>
           <div class="ticket-actions">
@@ -1527,7 +1533,7 @@ async function renderHome(
         }">
           <header class="topbar">
             <div>
-              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> ${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="${currentCompany?.logo_url ? escapeHtml(currentCompany.logo_url) : '/static/logo.png'}" alt="Logo" style="height:32px;border-radius:8px;"> ${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
             </div>
             <div class="top-actions">
@@ -1606,9 +1612,9 @@ async function renderHome(
 
           <section class="panel">
             <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Queue</h2>
-            <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
-              <a href="/?tab=active" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'active' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'active' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Active Tickets</a>
-              <a href="/?tab=resolved" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'resolved' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'resolved' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Resolved Tickets</a>
+            <div class="tabs" style="margin-bottom: 20px;">
+              <a href="/?tab=active" class="tab-link ${currentTab === 'active' ? 'is-active' : ''}">Active Tickets</a>
+              <a href="/?tab=resolved" class="tab-link ${currentTab === 'resolved' ? 'is-active' : ''}">Resolved Tickets</a>
             </div>
             
             <form class="filters ${currentUser.role === "agent" ? "" : "single"}" action="/search" method="get" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border);">
@@ -1645,7 +1651,7 @@ async function renderHome(
               </div>
             </form>
 
-            <p class="filter-note">Showing ${displayedTickets.length} ticket(s) • <a href="/search?${filterQuery}">Permalink</a> • <a href="/">Clear filters</a></p>
+            <p class="filter-note"><span>Showing ${displayedTickets.length} ticket(s)</span><span><a href="/search?${filterQuery}">Permalink</a> • <a href="/">Clear filters</a></span></p>
             <ul class="tickets">
               ${rows || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
             </ul>
@@ -2467,17 +2473,17 @@ function renderBilling(company, payments, plans, currentUser) {
 
   let planCards = plans.map(p => {
     const isCurrent = company.plan === p.code;
-    const featureList = (features[p.code] || ["Full access"]).map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
+    const featureList = (features[p.code] || ["Full access"]).map(f => `<li>✓ ${escapeHtml(f)}</li>`).join("");
     return `
-      <div style="flex:1;min-width:220px;border:2px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'};border-radius:12px;padding:24px;background:${isCurrent ? 'rgba(99,102,241,0.04)' : 'var(--panel)'};position:relative;">
-        ${isCurrent ? '<span style="position:absolute;top:-10px;right:16px;background:var(--accent);color:white;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600;">Current Plan</span>' : ''}
-        <h3 style="margin:0 0 4px;">${escapeHtml(p.name)}</h3>
-        <div style="margin:12px 0;">
-          <span style="font-size:28px;font-weight:700;">$${p.price_usd}</span><span style="color:var(--muted);font-size:14px;">/mo USD</span>
+      <div class="plan-card ${isCurrent ? 'is-current' : ''}">
+        ${isCurrent ? '<span class="plan-badge">Current Plan</span>' : ''}
+        <h3 class="plan-title">${escapeHtml(p.name)}</h3>
+        <div>
+          <span class="plan-price">$${p.price_usd}</span><span class="plan-note">/mo USD</span>
         </div>
-        <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">₱${p.price_php}/mo PHP</div>
-        <ul style="list-style:none;padding:0;margin:0 0 16px;">${featureList}</ul>
-        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : `<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`}
+        <div class="plan-note">₱${p.price_php}/mo PHP</div>
+        <ul>${featureList}</ul>
+        ${!isCurrent ? `<button type="button" class="primary-btn plan-cta" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')">Choose ${escapeHtml(p.name)}</button>` : `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`}
       </div>
     `;
   }).join("");
@@ -2485,17 +2491,17 @@ function renderBilling(company, payments, plans, currentUser) {
   if (!company.trial_ends_at) {
     const trialFeatures = ["Up to 3 agents", "50 tickets/month", "Basic reports", "30-day access"].map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
     planCards += `
-      <div style="flex:1;min-width:220px;border:2px solid var(--border);border-radius:12px;padding:24px;background:var(--panel);position:relative;">
-        <span style="position:absolute;top:-10px;right:16px;background:#f59e0b;color:white;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600;">30 Days Only</span>
-        <h3 style="margin:0 0 4px;">Free Trial</h3>
-        <div style="margin:12px 0;">
-          <span style="font-size:28px;font-weight:700;">$0</span><span style="color:var(--muted);font-size:14px;">/mo USD</span>
+      <div class="plan-card">
+        <span class="plan-badge" style="background:#f59e0b;">30 Days Only</span>
+        <h3 class="plan-title">Free Trial</h3>
+        <div>
+          <span class="plan-price">$0</span><span class="plan-note">/mo USD</span>
         </div>
-        <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">No credit card required</div>
-        <ul style="list-style:none;padding:0;margin:0 0 16px;">${trialFeatures}</ul>
+        <div class="plan-note">No credit card required</div>
+        <ul>${trialFeatures}</ul>
         <form action="/billing/trial" method="post">
           <input type="hidden" name="plan" value="starter" />
-          <button type="submit" class="ghost" style="width:100%;padding:10px;border:2px solid #f59e0b;color:#d97706;">Start Free Trial</button>
+          <button type="submit" class="ghost plan-cta" style="border:2px solid #f59e0b;color:#d97706;">Start Free Trial</button>
         </form>
       </div>
     `;
@@ -2537,7 +2543,7 @@ function renderBilling(company, payments, plans, currentUser) {
           <section class="panel">
             <h3>Choose Your Plan</h3>
             <p class="subtitle">Select a plan that fits your team. Payment activates your account permanently.</p>
-            <div style="display:flex;gap:20px;flex-wrap:wrap;margin:20px 0;">
+            <div class="plan-grid" style="margin:20px 0;">
               ${planCards}
             </div>
           </section>
@@ -3586,11 +3592,11 @@ function renderSuperAdminDashboard(data, currentUser) {
 
   const companyRows = companies.map(c => {
     const statusColor = c.status === 'active' ? '#10b981' : c.status === 'pending' ? '#f59e0b' : '#ef4444';
-    const trialLabel = c.trial_ends_at ? new Date(c.trial_ends_at).toLocaleDateString() : '—';
+    const trialLabel = c.trial_ends_at ? new Date(c.trial_ends_at).toLocaleDateString() : "—";
     return `
       <tr>
         <td><strong>${escapeHtml(c.name)}</strong><br><span style="font-size:12px; color: var(--muted);">${escapeHtml(c.slug)}</span></td>
-        <td><span style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; background:${statusColor};">${escapeHtml(c.status)}</span></td>
+        <td><span class="badge" style="background:${statusColor}; color:white;">${escapeHtml(c.status)}</span></td>
         <td>${escapeHtml((c.plan === 'pending_plan' || !c.plan) ? 'Not Selected' : c.plan.charAt(0).toUpperCase() + c.plan.slice(1))}</td>
         <td>${c.user_count}</td>
         <td>${c.ticket_count}</td>
@@ -3779,8 +3785,9 @@ function renderPublicLanding() {
           </nav>
           <header class="public-hero">
             <div class="hero-content">
-              <h1>The IT Desk that runs itself.</h1>
-              <p>Fast, AI-prioritized, and beautifully simple. Stop wrangling emails and start resolving issues. Enjoy a powerful, dedicated instance for your company.</p>
+              <p class="eyebrow">AI-powered ticketing for modern IT</p>
+              <h1>Run support like a product, not a queue.</h1>
+              <p>Intelligent triage, clean handoffs, and clear accountability for every request. Give your team a branded help desk that looks as sharp as it performs.</p>
               <div class="cta-group">
                 <div style="display: flex; gap: 16px; flex-wrap: wrap;">
                   <form action="/demo" method="post">
@@ -3789,10 +3796,10 @@ function renderPublicLanding() {
                   </form>
                   <form action="/demo" method="post">
                     <input type="hidden" name="role" value="requester" />
-                    <button type="submit" class="primary-btn" style="background: linear-gradient(135deg, #10b981, #059669);">📝 Try as Requestor</button>
+                    <button type="submit" class="primary-btn" style="background: linear-gradient(135deg, #f97316, #ea580c);">📝 Try as Requester</button>
                   </form>
                 </div>
-                <p class="demo-note">No sign-up needed. A unique 30-day demo environment is created instantly for you.</p>
+                <p class="demo-note">Instant sandbox with sample data. No signup, no credit card.</p>
               </div>
             </div>
             <div class="hero-image-wrapper">
@@ -3804,12 +3811,25 @@ function renderPublicLanding() {
                 </div>
                 <div class="mockup-body">
                   <div class="mockup-ticket">
-                    <div class="mockup-title">Cannot access payroll</div>
-                    <div class="mockup-badge priority high">High Priority</div>
+                    <div>
+                      <div class="mockup-title">Cannot access payroll</div>
+                      <div class="meta-pill">AI 92% • keyword: payroll</div>
+                    </div>
+                    <div class="mockup-badge priority high">High</div>
                   </div>
                   <div class="mockup-ticket">
-                    <div class="mockup-title">Need a new monitor</div>
-                    <div class="mockup-badge priority low">Low Priority</div>
+                    <div>
+                      <div class="mockup-title">VPN not connecting</div>
+                      <div class="meta-pill">AI 71% • keyword: vpn</div>
+                    </div>
+                    <div class="mockup-badge priority medium">Medium</div>
+                  </div>
+                  <div class="mockup-ticket">
+                    <div>
+                      <div class="mockup-title">Need a new monitor</div>
+                      <div class="meta-pill">AI 40% • default</div>
+                    </div>
+                    <div class="mockup-badge priority low">Low</div>
                   </div>
                 </div>
               </div>
@@ -3820,22 +3840,22 @@ function renderPublicLanding() {
             <div class="feature-card glass">
               <div class="icon">🤖</div>
               <h3>AI Triage</h3>
-              <p>Tickets are automatically prioritized based on language and urgency so agents know what to tackle first.</p>
+              <p>Automatic priority scoring from language and urgency signals so agents never miss critical work.</p>
+            </div>
+            <div class="feature-card glass">
+              <div class="icon">🧭</div>
+              <h3>Ownership & Routing</h3>
+              <p>One-click assignment, clear SLAs, and a shared queue that keeps every ticket moving.</p>
             </div>
             <div class="feature-card glass">
               <div class="icon">🔒</div>
               <h3>Domain Security</h3>
-              <p>Enforce signups by verified company email domains. Automate onboarding while keeping out the noise.</p>
+              <p>Enforce company-only signups and invite gates so your service desk stays internal.</p>
             </div>
             <div class="feature-card glass">
-              <div class="icon">⚡</div>
-              <h3>SLA Tracking</h3>
-              <p>Never miss a deadline with automated SLA due dates, dynamic priorities, and real-time dashboard alerts.</p>
-            </div>
-            <div class="feature-card glass">
-              <div class="icon">💳</div>
-              <h3>Global Payments</h3>
-              <p>Ready to go live? Upgrade securely via Stripe, PayPal, or GCash with instant automated webhooks.</p>
+              <div class="icon">📊</div>
+              <h3>Actionable Reports</h3>
+              <p>Track volume, SLA risk, and resolution trends with simple, readable analytics.</p>
             </div>
           </section>
         </main>

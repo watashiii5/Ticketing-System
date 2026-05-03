@@ -5,11 +5,15 @@ services:
     buildCommand: npm install
     startCommand: node src/server.js
     disk:
-      name: sqlite-data
-      mountPath: /opt/render/project/src/data
+      name: uploads
+      mountPath: /opt/render/project/src/uploads
       sizeGB: 1
     envVars:
       - key: PORT
         value: 3000
       - key: SESSION_SECRET
         generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: UPLOADS_DIR
+        value: /opt/render/project/src/uploads
