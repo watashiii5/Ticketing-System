@@ -1227,8 +1227,13 @@ app.post("/signup", async (req, res) => {
     return userId;
   });
 
-  req.session.userId = await transaction();
-  res.redirect("/billing");
+  try {
+    req.session.userId = await transaction();
+    res.redirect("/billing");
+  } catch (err) {
+    console.error("Signup error:", err);
+    return res.status(400).send(renderSignup("This email or company name is already registered, or an error occurred. Please try a different email."));
+  }
 });
 
 app.get("/billing", requireAuth, async (req, res) => {
