@@ -1013,16 +1013,16 @@ app.post("/signup", (req, res) => {
     return res.status(400).send(renderSignup("All fields are required."));
   }
 
+  let finalDomains = domains;
   if (domains) {
     const allowed = domains
       .split(",")
       .map((item) => item.trim().toLowerCase())
       .filter(Boolean);
     const domain = email.split("@")[1] || "";
-    if (allowed.length && !allowed.includes(domain)) {
-      return res
-        .status(400)
-        .send(renderSignup("Your email domain is not in the allowed list."));
+    if (domain && !allowed.includes(domain)) {
+      allowed.push(domain);
+      finalDomains = allowed.join(", ");
     }
   }
 
@@ -1043,7 +1043,7 @@ app.post("/signup", (req, res) => {
       companyName,
       slug || slugify(companyName),
       inviteRequired,
-      domains,
+      finalDomains,
       now
     ).lastInsertRowid;
     const userId = createUser.run(name, companyId).lastInsertRowid;
@@ -1122,6 +1122,25 @@ app.post("/billing/request", requireAuth, (req, res) => {
 
   logAudit(req.user.id, req.user.company_id, "billing.request", "company", company.id, `${planCode} via ${method}`);
   res.redirect("/billing");
+});
+
+app.post("/billing/trial", requireAuth, (req, res) => {
+  const planCode = (req.body.plan || "starter").trim();
+  const company = db.prepare("SELECT id, trial_ends_at FROM companies WHERE id = ?").get(req.user.company_id);
+
+  if (!company) {
+    return res.status(400).send("Company not found.");
+  }
+  
+  if (company.trial_ends_at) {
+    return res.status(400).send("A trial has already been started for this company.");
+  }
+
+  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("UPDATE companies SET plan = ?, trial_ends_at = ?, status = 'active' WHERE id = ?").run(planCode, trialEndsAt, company.id);
+
+  logAudit(req.user.id, req.user.company_id, "billing.trial_started", "company", company.id, `Trial for ${planCode}`);
+  res.redirect("/");
 });
 
 app.post("/webhooks/stripe", (req, res) => {
@@ -2183,6 +2202,13 @@ function renderBilling(company, payments, plans, currentUser) {
                 <button type="submit">Submit Payment</button>
               </div>
             </form>
+            ${!company.trial_ends_at ? `
+              <form action="/billing/trial" method="post" style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
+                <input type="hidden" id="trial-plan" name="plan" value="" />
+                <button type="submit" class="ghost" style="width:100%; border:2px solid var(--accent); color:var(--accent);">Start 30-Day Free Trial Instead</button>
+                <p style="font-size:12px; color:var(--muted); text-align:center; margin-top:8px;">No credit card required for trial.</p>
+              </form>
+            ` : ''}
           </section>
 
           <section class="panel">
@@ -2208,6 +2234,8 @@ function renderBilling(company, payments, plans, currentUser) {
         <script>
           function selectPlan(code, name, usd, php) {
             document.getElementById('selected-plan').value = code;
+            const trialInput = document.getElementById('trial-plan');
+            if (trialInput) trialInput.value = code;
             document.getElementById('plan-display').textContent = name + ' — ' + usd + '/mo (' + php + '/mo)';
             document.getElementById('payment-section').style.display = '';
             document.getElementById('payment-section').scrollIntoView({ behavior: 'smooth' });
