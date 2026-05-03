@@ -967,6 +967,14 @@ app.post("/admin/companies/:id/action", requireAuth, requireSuperAdmin, async (r
     const transaction = db.transaction(async () => {
       await db.prepare("DELETE FROM tickets WHERE company_id = ?").run(id);
       await db.prepare("DELETE FROM audit_logs WHERE company_id = ?").run(id);
+      
+      const users = await db.prepare("SELECT id FROM users WHERE company_id = ?").all(id);
+      if (users && users.length > 0) {
+        for (const u of users) {
+          await db.prepare("DELETE FROM credentials WHERE user_id = ?").run(u.id);
+        }
+      }
+      
       await db.prepare("DELETE FROM users WHERE company_id = ?").run(id);
       await db.prepare("DELETE FROM payment_requests WHERE company_id = ?").run(id);
       await db.prepare("DELETE FROM companies WHERE id = ?").run(id);

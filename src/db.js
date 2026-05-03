@@ -255,7 +255,7 @@ async function initializeDatabase() {
 
   const firstCompany = (await pool.query("SELECT id FROM companies ORDER BY id LIMIT 1")).rows[0];
   if (firstCompany) {
-    await pool.query("UPDATE users SET company_id = $1 WHERE company_id IS NULL", [firstCompany.id]);
+    await pool.query("UPDATE users SET company_id = $1 WHERE company_id IS NULL AND role != 'super_admin'", [firstCompany.id]);
     await pool.query("UPDATE tickets SET company_id = $1 WHERE company_id IS NULL", [firstCompany.id]);
   }
 
@@ -274,6 +274,7 @@ async function initializeDatabase() {
 
   const superAdmin = (await pool.query("SELECT id FROM users WHERE role = 'super_admin'")).rows[0];
   if (!superAdmin) {
+    await pool.query("DELETE FROM credentials WHERE email = 'admin@platform.test'");
     const result = await pool.query(
       "INSERT INTO users (name, role, company_id) VALUES ($1, $2, NULL) RETURNING id",
       ["Platform Admin", "super_admin"]
