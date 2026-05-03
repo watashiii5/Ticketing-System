@@ -1053,27 +1053,7 @@ app.post("/signup", (req, res) => {
   });
 
   req.session.userId = transaction();
-  res.redirect("/select-plan");
-});
-
-app.get("/select-plan", requireAuth, (req, res) => {
-  if (req.user.role === "super_admin") return res.redirect("/");
-  const company = db.prepare("SELECT id, name, plan FROM companies WHERE id = ?").get(req.user.company_id);
-  if (company.plan !== 'pending_plan' && company.plan !== 'pending') {
-    return res.redirect("/billing");
-  }
-  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
-  res.send(renderSelectPlan(plans, company));
-});
-
-app.post("/select-plan", requireAuth, (req, res) => {
-  const planCode = req.body.plan;
-  if (!planCode) return res.status(400).send("Plan required");
-  
-  // Set the plan and grant a 30-day trial starting NOW
-  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  db.prepare("UPDATE companies SET plan = ?, trial_ends_at = ? WHERE id = ?").run(planCode, trialEndsAt, req.user.company_id);
-  res.redirect("/");
+  res.redirect("/billing");
 });
 
 app.get("/billing", requireAuth, (req, res) => {
@@ -1611,7 +1591,7 @@ function requireCompanyActive(req, res, next) {
   }
 
   if (company.plan === "pending_plan") {
-    return res.redirect("/select-plan");
+    return res.redirect("/billing");
   }
 
   if (company.status === "active") {
@@ -1948,49 +1928,6 @@ function renderSignup(message = "") {
   `;
 }
 
-function renderSelectPlan(plans, company) {
-  const cards = plans.map(p => `
-    <div class="report-card plan-card" style="text-align: center; border: 2px solid var(--border); transition: all 0.2s; cursor: pointer;" onclick="document.getElementById('plan-${p.code}').checked = true; document.querySelectorAll('.plan-card').forEach(c => c.style.borderColor = 'var(--border)'); this.style.borderColor = 'var(--accent)';">
-      <div style="font-size: 40px; margin-bottom: 12px;">${p.icon || '📦'}</div>
-      <h3 style="font-size: 24px; margin: 0 0 8px;">${escapeHtml(p.name)}</h3>
-      <p style="font-size: 14px; color: var(--muted); margin-bottom: 16px;">
-        <strong style="font-size: 24px; color: var(--ink);">₱${p.price_php}</strong> /mo<br>
-        <span style="font-size: 13px;">(or $${p.price_usd} /mo)</span>
-      </p>
-      <input type="radio" id="plan-${p.code}" name="plan" value="${p.code}" required style="display: none;" />
-    </div>
-  `).join("");
-
-  return `
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Select a Plan</title>
-        <link rel="stylesheet" href="/static/styles.css" />
-      </head>
-      <body>
-        <main class="shell login-shell">
-          <section class="panel" style="max-width: 800px; width: 100%;">
-            <div style="text-align: center; margin-bottom: 32px;">
-              <h1>Choose your Plan</h1>
-              <p class="subtitle">Select the right tier for ${escapeHtml(company.name)}.</p>
-            </div>
-            <form action="/select-plan" method="post">
-              <div class="report-grid" style="margin-bottom: 32px;">
-                ${cards}
-              </div>
-              <div class="full actions" style="text-align: center;">
-                <button type="submit" class="glow-btn" style="padding: 14px 40px;">Continue to Billing</button>
-              </div>
-            </form>
-          </section>
-        </main>
-      </body>
-    </html>
-  `;
-}
 
 function renderBillingGate(currentUser) {
   return `
