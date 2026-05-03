@@ -1657,6 +1657,16 @@ async function renderHome(
               ${rows || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
             </ul>
           </section>
+          <footer class="app-footer">
+            <div class="footer-inner">
+              <span>Built by watashiii5 • IT Ticketing Desk</span>
+              <div>
+                <a class="footer-link" href="https://github.com/watashiii5" target="_blank" rel="noreferrer">github.com/watashiii5</a>
+                <span> • </span>
+                <a class="footer-link" href="https://watashiii5.github.io/portfolio/" target="_blank" rel="noreferrer">watashiii5.github.io/portfolio</a>
+              </div>
+            </div>
+          </footer>
         </main>
         <script>
           const SCROLL_KEY = 'desk_scroll';

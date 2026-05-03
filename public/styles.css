@@ -680,6 +680,38 @@ th { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-sp
   .tabs { flex-wrap: wrap; justify-content: center; }
 }
 
+@media (max-width: 700px) {
+  .shell { margin: 20px auto; padding: 0 16px 80px; }
+  .topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .top-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .hero { padding: 28px; gap: 20px; }
+  .hero h1 { font-size: 34px; }
+  .stats { flex-wrap: wrap; gap: 16px; }
+  .public-nav { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .public-hero { padding: 48px 0 64px; }
+  .public-hero h1 { font-size: 40px; }
+  .glow-btn { width: 100%; justify-content: center; }
+  .ticket-header { gap: 12px; }
+  .meta { align-items: flex-start; }
+  .ticket-actions { gap: 8px; }
+  .ticket-actions > div { flex-wrap: wrap; width: 100%; }
+  .ticket-actions form { width: 100%; }
+  .ticket-actions form button,
+  .ticket-actions form select { width: 100%; }
+  .comments li,
+  .attachments li { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .attachment-form input { width: 100%; }
+  .table-wrap table { min-width: 520px; }
+  .login-shell { padding: 24px 16px; }
+  .floating-theme-toggle {
+    width: 52px;
+    height: 52px;
+    bottom: 16px;
+    left: 16px;
+    font-size: 24px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
@@ -707,4 +739,32 @@ th { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-sp
 .floating-theme-toggle:hover {
   transform: translateY(-4px) scale(1.05);
   box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+}
+
+.app-footer {
+  margin-top: 32px;
+  padding: 24px 0 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.app-footer .footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.app-footer .footer-link {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .app-footer .footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
