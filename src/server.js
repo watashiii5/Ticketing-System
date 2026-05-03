@@ -1310,7 +1310,7 @@ function renderHome(
   const rows = displayedTickets
     .map(
       (ticket) => `
-        <li class="ticket">
+        <li class="ticket bg-${ticket.priority}">
           <div class="ticket-header">
             <div>
               <h3>${escapeHtml(ticket.title)}</h3>
@@ -1574,7 +1574,27 @@ function renderHome(
             el.addEventListener('click', () => sessionStorage.setItem(SCROLL_KEY, window.scrollY));
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -1899,7 +1919,10 @@ function renderLogin(error = "") {
       <body>
         <main class="shell login-shell">
           <section class="panel login-panel">
-            <h1 style="display:flex;align-items:center;gap:12px;justify-content:center;"><img src="/static/logo.png" alt="Logo" style="height:36px;border-radius:8px;"> Sign in</h1>
+            <div style="text-align: center; margin-bottom: 24px;">
+              <img src="/static/logo.png" alt="Logo" style="height: 64px; border-radius: 12px; margin-bottom: 16px;">
+              <h1 style="margin: 0;">Sign in</h1>
+            </div>
             <p class="subtitle">Access your company's service desk.</p>
             ${error ? `<p class=\"error\">${escapeHtml(error)}</p>` : ""}
             <form class="login-form" action="/login" method="post">
@@ -1927,7 +1950,27 @@ function renderLogin(error = "") {
             });
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -1945,7 +1988,10 @@ function renderSignup(message = "") {
       <body>
         <main class="shell login-shell">
           <section class="panel login-panel">
-            <h1 style="display:flex;align-items:center;gap:12px;justify-content:center;"><img src="/static/logo.png" alt="Logo" style="height:36px;border-radius:8px;"> Create company account</h1>
+            <div style="text-align: center; margin-bottom: 24px;">
+              <img src="/static/logo.png" alt="Logo" style="height: 64px; border-radius: 12px; margin-bottom: 16px;">
+              <h1 style="margin: 0;">Create company account</h1>
+            </div>
             <p class="subtitle">Start with a 1-click setup. Payment is required before access.</p>
             ${message ? `<p class=\"notice\">${escapeHtml(message)}</p>` : ""}
             <form class="login-form" action="/signup" method="post">
@@ -1983,7 +2029,27 @@ function renderSignup(message = "") {
             });
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2054,7 +2120,27 @@ function renderCompanyAdmin(company, plans, currentUser) {
             </form>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2081,7 +2167,27 @@ function renderBillingGate(currentUser) {
             </form>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2161,7 +2267,27 @@ function renderCompanySettings(company, currentUser) {
           const el = document.getElementById('share-url');
           if (el) el.textContent = window.location.origin + '/c/${escapeHtml(company.slug || "")}';
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2325,7 +2451,27 @@ function renderBilling(company, payments, plans, currentUser) {
             }
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2393,7 +2539,27 @@ function renderCompanyLanding(company) {
             });
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2508,7 +2674,27 @@ function renderPlatformAdmin(companies, payments, currentUser) {
             </div>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2537,7 +2723,27 @@ function renderForgot(message = "") {
             <p class="helper"><a href="/login">Back to login</a></p>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2578,7 +2784,27 @@ function renderReset(token, error = "") {
             });
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2734,7 +2960,27 @@ function renderUserAdmin(users, invites, currentUser) {
             });
           });
         </script>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2789,7 +3035,27 @@ function renderAdminPlans(plans, currentUser) {
             </div>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -2874,7 +3140,27 @@ function renderReports(metrics, currentUser) {
             </ul>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -3156,7 +3442,27 @@ function renderSuperAdminDashboard(data, currentUser) {
             </div>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }
@@ -3242,7 +3548,27 @@ function renderPublicLanding() {
             </div>
           </section>
         </main>
-      </body>
+      
+    <script>
+      (function() {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        if (isDark) document.documentElement.classList.add('dark-mode');
+        
+        window.addEventListener('DOMContentLoaded', () => {
+          const btn = document.createElement('div');
+          btn.className = 'floating-theme-toggle';
+          btn.innerHTML = isDark ? '☀️' : '🌙';
+          document.body.appendChild(btn);
+          
+          btn.addEventListener('click', () => {
+            const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+            btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+          });
+        });
+      })();
+    </script>
+  </body>
     </html>
   `;
 }

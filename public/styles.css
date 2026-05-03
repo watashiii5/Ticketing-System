@@ -13,6 +13,21 @@
   --shadow-lg: 0 20px 40px -10px rgba(0,0,0,0.12);
   --glass-bg: rgba(255, 255, 255, 0.65);
   --glass-border: rgba(255, 255, 255, 0.5);
+  --input-bg: rgba(255, 255, 255, 0.8);
+}
+
+html.dark-mode {
+  --ink: #f1f5f9;
+  --muted: #94a3b8;
+  --panel: rgba(30, 41, 59, 0.85);
+  --surface: #0f172a;
+  --border: rgba(51, 65, 85, 0.6);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 40px -10px rgba(0,0,0,0.7);
+  --glass-bg: rgba(30, 41, 59, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --input-bg: rgba(15, 23, 42, 0.8);
 }
 
 * { box-sizing: border-box; }
@@ -21,9 +36,7 @@ body {
   margin: 0;
   font-family: "Inter", sans-serif;
   color: var(--ink);
-  background: radial-gradient(circle at 15% 50%, #eff6ff, transparent 50%),
-              radial-gradient(circle at 85% 30%, #e0e7ff, transparent 50%),
-              var(--surface);
+  background: var(--surface);
   background-attachment: fixed;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -144,6 +157,18 @@ label {
   color: var(--muted);
   margin-bottom: 6px;
 }
+label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: normal;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
 
 input, select, textarea {
   width: 100%;
@@ -152,14 +177,18 @@ input, select, textarea {
   padding: 12px 16px;
   font-family: inherit;
   font-size: 15px;
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--input-bg);
+  color: var(--ink);
   transition: all 0.2s;
+}
+input[type="checkbox"] {
+  width: auto;
 }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
-  background: #fff;
+  background: var(--input-bg);
 }
 textarea { resize: vertical; }
 
@@ -200,7 +229,7 @@ textarea { resize: vertical; }
 /* Tickets */
 .tickets { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
 .ticket {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
   padding: 24px;
@@ -209,8 +238,16 @@ textarea { resize: vertical; }
 .ticket:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
-  background: #fff;
+  background: var(--panel);
 }
+
+.ticket.bg-low { background: linear-gradient(180deg, rgba(226, 232, 240, 0.3), transparent); }
+.ticket.bg-medium { background: linear-gradient(180deg, rgba(254, 240, 138, 0.2), transparent); }
+.ticket.bg-high { background: linear-gradient(180deg, rgba(254, 202, 202, 0.2), transparent); }
+
+html.dark-mode .ticket.bg-low { background: linear-gradient(180deg, rgba(51, 65, 85, 0.3), transparent); }
+html.dark-mode .ticket.bg-medium { background: linear-gradient(180deg, rgba(133, 77, 14, 0.3), transparent); }
+html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(153, 27, 27, 0.3), transparent); }
 
 .ticket-header { display: flex; justify-content: space-between; gap: 20px; }
 .ticket h3 { margin: 0 0 8px; font-size: 20px; }
@@ -363,3 +400,29 @@ th { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-sp
   .priority-form, .sla-form, .comment-form, .attachment-form { flex-direction: column; align-items: stretch; }
   .priority-form input, .sla-form input, .ticket-actions select { width: 100%; }
 }
+ 
+ . f l o a t i n g - t h e m e - t o g g l e   {  
+     p o s i t i o n :   f i x e d ;  
+     b o t t o m :   2 4 p x ;  
+     r i g h t :   2 4 p x ;  
+     w i d t h :   4 8 p x ;  
+     h e i g h t :   4 8 p x ;  
+     b o r d e r - r a d i u s :   5 0 % ;  
+     b a c k g r o u n d :   v a r ( - - g l a s s - b g ) ;  
+     b o r d e r :   1 p x   s o l i d   v a r ( - - g l a s s - b o r d e r ) ;  
+     b o x - s h a d o w :   v a r ( - - s h a d o w - m d ) ;  
+     d i s p l a y :   f l e x ;  
+     a l i g n - i t e m s :   c e n t e r ;  
+     j u s t i f y - c o n t e n t :   c e n t e r ;  
+     f o n t - s i z e :   2 4 p x ;  
+     c u r s o r :   p o i n t e r ;  
+     z - i n d e x :   9 9 9 9 ;  
+     b a c k d r o p - f i l t e r :   b l u r ( 1 2 p x ) ;  
+     c o l o r :   v a r ( - - i n k ) ;  
+     t r a n s i t i o n :   t r a n s f o r m   0 . 2 s ,   b o x - s h a d o w   0 . 2 s ;  
+ }  
+ . f l o a t i n g - t h e m e - t o g g l e : h o v e r   {  
+     t r a n s f o r m :   t r a n s l a t e Y ( - 2 p x ) ;  
+     b o x - s h a d o w :   v a r ( - - s h a d o w - l g ) ;  
+ }  
+ 
