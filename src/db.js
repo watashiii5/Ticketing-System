@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const { AsyncLocalStorage } = require("async_hooks");
