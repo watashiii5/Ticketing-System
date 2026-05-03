@@ -1389,6 +1389,7 @@ function renderHome(
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>IT Ticketing Desk</title>
@@ -1577,8 +1578,7 @@ function renderHome(
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -1911,6 +1911,7 @@ function renderLogin(error = "") {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Login • Service Desk</title>
@@ -1953,8 +1954,7 @@ function renderLogin(error = "") {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -1980,6 +1980,7 @@ function renderSignup(message = "") {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Company signup</title>
@@ -2032,8 +2033,7 @@ function renderSignup(message = "") {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2071,6 +2071,7 @@ function renderCompanyAdmin(company, plans, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Manage ${escapeHtml(company.name)} · Platform Admin</title>
@@ -2123,8 +2124,7 @@ function renderCompanyAdmin(company, plans, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2150,6 +2150,7 @@ function renderBillingGate(currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Billing required</title>
@@ -2170,8 +2171,7 @@ function renderBillingGate(currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2197,6 +2197,7 @@ function renderCompanySettings(company, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Company settings</title>
@@ -2270,8 +2271,7 @@ function renderCompanySettings(company, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2360,6 +2360,7 @@ function renderBilling(company, payments, plans, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Billing & Plans</title>
@@ -2474,8 +2475,7 @@ function renderBilling(company, payments, plans, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2520,6 +2520,7 @@ function renderCompanyLanding(company) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(company.name)} Service Desk</title>
@@ -2562,8 +2563,7 @@ function renderCompanyLanding(company) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2632,6 +2632,7 @@ function renderPlatformAdmin(companies, payments, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Platform Admin</title>
@@ -2697,8 +2698,7 @@ function renderPlatformAdmin(companies, payments, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2724,6 +2724,7 @@ function renderForgot(message = "") {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Reset password</title>
@@ -2746,8 +2747,7 @@ function renderForgot(message = "") {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2773,6 +2773,7 @@ function renderReset(token, error = "") {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Choose new password</title>
@@ -2807,8 +2808,7 @@ function renderReset(token, error = "") {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -2855,6 +2855,7 @@ function renderUserAdmin(users, invites, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>User Admin</title>
@@ -2983,8 +2984,7 @@ function renderUserAdmin(users, invites, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -3023,6 +3023,7 @@ function renderAdminPlans(plans, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Manage Plans</title>
@@ -3058,8 +3059,7 @@ function renderAdminPlans(plans, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -3108,6 +3108,7 @@ function renderReports(metrics, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Reports</title>
@@ -3163,8 +3164,7 @@ function renderReports(metrics, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -3344,6 +3344,7 @@ function renderSuperAdminDashboard(data, currentUser) {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Platform Admin · Service Desk</title>
@@ -3465,8 +3466,7 @@ function renderSuperAdminDashboard(data, currentUser) {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
@@ -3492,6 +3492,7 @@ function renderPublicLanding() {
     <!doctype html>
     <html lang="en">
       <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Service Desk - Modern Ticketing</title>
@@ -3571,8 +3572,7 @@ function renderPublicLanding() {
       
     <script>
       (function() {
-        const isDark = localStorage.getItem('theme') === 'dark';
-        if (isDark) document.documentElement.classList.add('dark-mode');
+        const isDark = document.documentElement.classList.contains('dark-mode');
         
         window.addEventListener('DOMContentLoaded', () => {
           const btn = document.createElement('div');
