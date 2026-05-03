@@ -202,6 +202,19 @@ app.post("/admin/users", requireAuth, requireAgent, requireCompanyActive, (req, 
     return res.status(400).send("Name, email, and password are required.");
   }
 
+  // Enforce agent limit per plan
+  if (role === "agent" && req.company) {
+    const plan = getEffectivePlan(req.company);
+    const limits = getPlanLimits(plan);
+    if (limits.maxAgents !== -1) {
+      const currentAgents = getCompanyAgentCount(req.user.company_id);
+      if (currentAgents >= limits.maxAgents) {
+        return res.status(403).send("Agent limit reached (" + limits.maxAgents + " agents on the " + plan + " plan). Upgrade your plan to add more agents.");
+      }
+    }
+  }
+
+
   const passwordHash = bcrypt.hashSync(password, 10);
   const insertUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, ?, ?)"
@@ -309,6 +322,16 @@ app.get("/admin/company", requireAuth, requireAgent, requireCompanyActive, (req,
 });
 
 app.post("/admin/company", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
+  // Gate custom branding to growth+ plans
+  if (req.company) {
+    const plan = getEffectivePlan(req.company);
+    const limits = getPlanLimits(plan);
+    if (!limits.customBranding && (req.body.brand_color || req.body.logo_url)) {
+      req.body.brand_color = "";
+      req.body.logo_url = "";
+    }
+  }
+
   const slug = (req.body.slug || "").trim().toLowerCase();
   const brandColor = (req.body.brand_color || "").trim();
   const logoUrl = (req.body.logo_url || "").trim();
@@ -505,6 +528,19 @@ app.post("/tickets", requireAuth, requireCompanyActive, (req, res) => {
   if (!title || !description) {
     return res.status(400).send("Title and description are required.");
   }
+
+  // Enforce ticket limit per plan
+  if (req.company) {
+    const plan = getEffectivePlan(req.company);
+    const limits = getPlanLimits(plan);
+    if (limits.maxTicketsPerMonth !== -1) {
+      const ticketsThisMonth = getCompanyTicketsThisMonth(req.user.company_id);
+      if (ticketsThisMonth >= limits.maxTicketsPerMonth) {
+        return res.status(403).send("Monthly ticket limit reached (" + limits.maxTicketsPerMonth + " tickets on the " + plan + " plan). Upgrade your plan for more tickets.");
+      }
+    }
+  }
+
 
   const now = new Date().toISOString();
   const slaDueAt = rawSla
@@ -708,6 +744,20 @@ app.get("/search", requireAuth, requireCompanyActive, (req, res) => {
   );
 });
 
+app.get("/audit-logs", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
+  // Audit logs: enterprise only
+  if (req.company) {
+    const plan = getEffectivePlan(req.company);
+    const limits = getPlanLimits(plan);
+    if (!limits.auditLogs) {
+      return res.status(403).send("Audit logs are available on the Enterprise plan. Please upgrade.");
+    }
+  }
+  const logs = db.prepare("SELECT audit_logs.*, users.name as actor_name FROM audit_logs LEFT JOIN users ON users.id = audit_logs.actor_id WHERE audit_logs.company_id = ? ORDER BY audit_logs.id DESC LIMIT 100").all(req.user.company_id);
+  res.send(renderAuditLogs(logs, req.user));
+});
+
+
 app.get("/reports", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
   const isSuper = req.user.role === "super_admin";
   const compFilter = isSuper ? "" : "WHERE company_id = ?";
@@ -740,9 +790,47 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, (req, res) 
     )
     .all(...params);
 
+
+  // Advanced analytics data for growth+ plans
+  let advancedData = null;
+  const plan = req.company ? getEffectivePlan(req.company) : 'enterprise';
+  const limits = getPlanLimits(plan);
+  
+  if (limits.advancedAnalytics) {
+    const avgResolutionTime = db.prepare(`
+      SELECT AVG(julianday(
+        CASE WHEN status = 'resolved' THEN created_at ELSE datetime('now') END
+      ) - julianday(created_at)) * 24 as avg_hours
+      FROM tickets ${compFilter}
+    `).get(...params);
+    
+    const ticketsByDay = db.prepare(`
+      SELECT DATE(created_at) as day, COUNT(*) as count
+      FROM tickets ${compFilter}
+      GROUP BY DATE(created_at)
+      ORDER BY day DESC
+      LIMIT 14
+    `).all(...params);
+
+    const agentPerformance = db.prepare(`
+      SELECT users.name, COUNT(tickets.id) as assigned_count,
+        SUM(CASE WHEN tickets.status = 'resolved' THEN 1 ELSE 0 END) as resolved_count
+      FROM users
+      LEFT JOIN tickets ON tickets.assignee_id = users.id
+      WHERE users.company_id = ? AND users.role = 'agent'
+      GROUP BY users.id
+    `).all(req.user.company_id);
+
+    advancedData = {
+      avgResolutionHours: avgResolutionTime ? Math.round((avgResolutionTime.avg_hours || 0) * 10) / 10 : 0,
+      ticketsByDay,
+      agentPerformance
+    };
+  }
+
   res.send(
     renderReports(
-      { total, open, inProgress, resolved, overdue, topPriorities },
+      { total, open, inProgress, resolved, overdue, topPriorities, advancedData, currentPlan: plan },
       req.user
     )
   );
@@ -810,6 +898,15 @@ app.post("/tickets/:id/assign", requireAuth, requireAgent, requireCompanyActive,
 });
 
 app.post("/tickets/:id/sla", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
+  // Custom SLA rules: enterprise only
+  if (req.company) {
+    const plan = getEffectivePlan(req.company);
+    const limits = getPlanLimits(plan);
+    if (!limits.customSla) {
+      return res.status(403).send("Custom SLA rules are available on the Enterprise plan. Please upgrade.");
+    }
+  }
+
   const id = Number(req.params.id);
   const raw = (req.body.sla_due_at || "").trim();
   if (!raw) {
@@ -1411,6 +1508,7 @@ function renderHome(
                     <a class="ghost" href="/reports">Reports</a>
                     <a class="ghost" href="/admin/users">Users</a>
                     <a class="ghost" href="/admin/company">Company</a>
+                    ${(function(){ if(currentCompany) { const p = getEffectivePlan(currentCompany); const l = getPlanLimits(p); if(l.auditLogs) return '<a class="ghost" href="/audit-logs">Audit Logs</a>'; } return ''; })()}
                   `
                   : ""
               }
@@ -1431,6 +1529,16 @@ function renderHome(
                 <span class="stat">${tickets.length}</span>
                 <span class="label">Total tickets</span>
               </div>
+              ${(function(){
+                if (!currentCompany) return '';
+                const plan = getEffectivePlan(currentCompany);
+                const limits = getPlanLimits(plan);
+                if (limits.maxTicketsPerMonth === -1) return '';
+                const used = getCompanyTicketsThisMonth(currentCompany.id);
+                const pct = Math.round((used / limits.maxTicketsPerMonth) * 100);
+                const color = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : 'var(--accent)';
+                return '<div><span class="stat" style="color:' + color + ';">' + used + '/' + limits.maxTicketsPerMonth + '</span><span class="label">Tickets this month</span></div>';
+              })()}
               <div>
                 <span class="stat">${tickets.filter((t) => t.status === "open").length}</span>
                 <span class="label">Open</span>
@@ -1692,6 +1800,32 @@ function slugify(value) {
     .replace(/[^a-z0-9\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-");
+}
+
+function getPlanLimits(planCode) {
+  const limits = {
+    free_trial: { maxAgents: 3, maxTicketsPerMonth: 50, emailNotifications: false, advancedAnalytics: false, customBranding: false, apiAccess: false, customSla: false, auditLogs: false },
+    starter:    { maxAgents: 5, maxTicketsPerMonth: 100, emailNotifications: true, advancedAnalytics: false, customBranding: false, apiAccess: false, customSla: false, auditLogs: false },
+    growth:     { maxAgents: 20, maxTicketsPerMonth: -1, emailNotifications: true, advancedAnalytics: true, customBranding: true, apiAccess: false, customSla: false, auditLogs: false },
+    enterprise: { maxAgents: -1, maxTicketsPerMonth: -1, emailNotifications: true, advancedAnalytics: true, customBranding: true, apiAccess: true, customSla: true, auditLogs: true },
+  };
+  return limits[planCode] || limits.starter;
+}
+
+function getCompanyAgentCount(companyId) {
+  return db.prepare("SELECT COUNT(*) as count FROM users WHERE company_id = ? AND role = 'agent'").get(companyId).count;
+}
+
+function getCompanyTicketsThisMonth(companyId) {
+  const now = new Date();
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  return db.prepare("SELECT COUNT(*) as count FROM tickets WHERE company_id = ? AND created_at >= ?").get(companyId, firstDay).count;
+}
+
+function getEffectivePlan(company) {
+  if (!company) return 'starter';
+  if (company.trial_ends_at && company.status !== 'active') return 'free_trial';
+  return company.plan || 'starter';
 }
 
 function logAudit(actorId, companyId, action, entityType, entityId, details) {
@@ -2234,18 +2368,16 @@ function renderCompanySettings(company, currentUser) {
                 <label for="slug">Company URL slug</label>
                 <input id="slug" name="slug" value="${escapeHtml(company.slug || "")}" />
               </div>
+              ${(function(){ const plan = getEffectivePlan(company); const limits = getPlanLimits(plan); return limits.customBranding; })() ? `
               <div>
                 <label for="brand_color">Brand color</label>
-                <input id="brand_color" name="brand_color" placeholder="#d26a2b" value="${escapeHtml(
-                  company.brand_color || ""
-                )}" />
+                <input id="brand_color" name="brand_color" placeholder="#d26a2b" value="${escapeHtml(company.brand_color || "")}" />
               </div>
               <div>
                 <label for="logo_url">Logo URL</label>
-                <input id="logo_url" name="logo_url" placeholder="https://..." value="${escapeHtml(
-                  company.logo_url || ""
-                )}" />
+                <input id="logo_url" name="logo_url" placeholder="https://..." value="${escapeHtml(company.logo_url || "")}" />
               </div>
+              ` : `<div class="full" style="padding:16px;background:var(--glass-bg);border-radius:12px;border:1px solid var(--border);"><p style="margin:0;font-size:14px;color:var(--muted);">🎨 Custom branding (logo & colors) is available on <strong>Growth</strong> and <strong>Enterprise</strong> plans. <a href="/billing">Upgrade</a></p></div>`}
               <div>
                 <label for="allowed_domains">Allowed email domains</label>
                 <input id="allowed_domains" name="allowed_domains" value="${escapeHtml(
@@ -2310,7 +2442,7 @@ function renderBilling(company, payments, plans, currentUser) {
   const features = {
     starter: ["Up to 5 agents", "100 tickets/month", "Email notifications", "Basic reports"],
     growth: ["Up to 20 agents", "Unlimited tickets", "Priority support", "Advanced analytics", "Custom branding"],
-    enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "SSO integration", "Custom SLA rules", "Audit logs"]
+    enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "Custom SLA rules", "Audit logs", "All Growth features"]
   };
 
   let planCards = plans.map(p => {
@@ -2331,7 +2463,7 @@ function renderBilling(company, payments, plans, currentUser) {
   }).join("");
 
   if (!company.trial_ends_at) {
-    const trialFeatures = features.starter.map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
+    const trialFeatures = ["Up to 3 agents", "50 tickets/month", "Basic reports", "30-day access"].map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
     planCards += `
       <div style="flex:1;min-width:220px;border:2px solid var(--border);border-radius:12px;padding:24px;background:var(--panel);position:relative;">
         <span style="position:absolute;top:-10px;right:16px;background:#f59e0b;color:white;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600;">30 Days Only</span>
@@ -3099,6 +3231,77 @@ function renderInviteRows(invites) {
     .join("");
 }
 
+function renderAuditLogs(logs, currentUser) {
+  const rows = logs.map(log => `
+    <tr>
+      <td>${new Date(log.created_at).toLocaleString()}</td>
+      <td>${escapeHtml(log.actor_name || 'System')}</td>
+      <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:white;background:var(--accent);">${escapeHtml(log.action)}</span></td>
+      <td>${escapeHtml(log.entity_type)}</td>
+      <td>${escapeHtml(log.details || '')}</td>
+    </tr>
+  `).join('');
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Audit Logs</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell">
+          <header class="topbar">
+            <div>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Audit Logs</h2>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
+            </div>
+            <div class="top-actions">
+              <a class="ghost" href="/">Back to desk</a>
+              <form action="/logout" method="post">
+                <button type="submit" class="ghost">Log out</button>
+              </form>
+            </div>
+          </header>
+          <section class="panel">
+            <h3>🔍 Activity Log (Last 100 Events)</h3>
+            <p class="subtitle">Enterprise-only feature — full audit trail of all actions in your company.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr>
+                </thead>
+                <tbody>
+                  ${rows || '<tr><td colspan="5" class="empty">No audit logs yet.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+        <script>
+          (function() {
+            const isDark = document.documentElement.classList.contains('dark-mode');
+            window.addEventListener('DOMContentLoaded', () => {
+              const btn = document.createElement('div');
+              btn.className = 'floating-theme-toggle';
+              btn.innerHTML = isDark ? '☀️' : '🌙';
+              document.body.appendChild(btn);
+              btn.addEventListener('click', () => {
+                const isDarkNow = document.documentElement.classList.toggle('dark-mode');
+                localStorage.setItem('theme', isDarkNow ? 'dark' : 'light');
+                btn.innerHTML = isDarkNow ? '☀️' : '🌙';
+              });
+            });
+          })();
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+
 function renderReports(metrics, currentUser) {
   const rows = metrics.topPriorities
     .map((row) => `<li>${escapeHtml(row.priority)}: ${row.count}</li>`)
@@ -3160,6 +3363,53 @@ function renderReports(metrics, currentUser) {
               ${rows}
             </ul>
           </section>
+
+          ${metrics.advancedData ? `
+          <section class="panel">
+            <h3>📊 Advanced Analytics</h3>
+            <div class="report-grid">
+              <div class="report-card">
+                <h4>Avg Resolution Time</h4>
+                <p style="font-size:28px;">${metrics.advancedData.avgResolutionHours}h</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>📈 Tickets Created (Last 14 Days)</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:4px;align-items:end;height:120px;padding:16px 0;">
+              ${(function() {
+                const days = metrics.advancedData.ticketsByDay.slice().reverse();
+                const maxCount = Math.max(...days.map(d => d.count), 1);
+                return days.map(d => {
+                  const pct = (d.count / maxCount) * 100;
+                  return '<div style="display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;">'
+                    + '<span style="font-size:10px;color:var(--muted);margin-bottom:4px;">' + d.count + '</span>'
+                    + '<div style="width:100%;min-height:4px;height:' + pct + '%;background:var(--accent);border-radius:4px 4px 0 0;"></div>'
+                    + '<span style="font-size:9px;color:var(--muted);margin-top:4px;white-space:nowrap;">' + d.day.slice(5) + '</span>'
+                    + '</div>';
+                }).join('');
+              })()}
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>👥 Agent Performance</h3>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Agent</th><th>Assigned</th><th>Resolved</th><th>Rate</th></tr></thead>
+                <tbody>
+                  ${metrics.advancedData.agentPerformance.map(a => '<tr>'
+                    + '<td>' + escapeHtml(a.name) + '</td>'
+                    + '<td>' + a.assigned_count + '</td>'
+                    + '<td>' + a.resolved_count + '</td>'
+                    + '<td>' + (a.assigned_count > 0 ? Math.round((a.resolved_count / a.assigned_count) * 100) : 0) + '%</td>'
+                    + '</tr>').join('')}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          ` : `<section class="panel" style="text-align:center;padding:40px;"><h3>📊 Advanced Analytics</h3><p style="color:var(--muted);">Advanced analytics are available on Growth and Enterprise plans.</p><a href="/billing" class="primary-btn" style="display:inline-block;margin-top:16px;">Upgrade Plan</a></section>`}
         </main>
       
     <script>
