@@ -223,7 +223,7 @@ app.post("/admin/users", requireAuth, requireAgent, requireCompanyActive, async 
     "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
   );
   const transaction = db.transaction(async () => {
-    const info = insertUser.run(name, role, req.user.company_id);
+    const info = await insertUser.run(name, role, req.user.company_id);
     await insertCred.run(info.lastInsertRowid, email, passwordHash);
   });
 
@@ -247,7 +247,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActi
   }
 
   const passwordHash = bcrypt.hashSync(newPassword, 10);
-  const user = db.prepare("SELECT company_id FROM users WHERE id = ?").get(id);
+  const user = await db.prepare("SELECT company_id FROM users WHERE id = ?").get(id);
   if (!user || user.company_id !== req.user.company_id) {
     return res.status(403).send("Not allowed.");
   }
@@ -258,7 +258,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActi
 });
 
 app.get("/admin/plans", requireAuth, requireSuperAdmin, async (req, res) => {
-  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
+  const plans = await db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
   res.send(renderAdminPlans(plans, req.user));
 });
 
@@ -419,14 +419,14 @@ app.get("/", async (req, res, next) => {
       FROM companies c ORDER BY c.created_at DESC
     `).all();
 
-    const totalTickets = db.prepare("SELECT COUNT(*) as cnt FROM tickets").get().cnt;
-    const resolvedTickets = db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get().cnt;
-    const totalUsers = db.prepare("SELECT COUNT(*) as cnt FROM users").get().cnt;
-    const freeTrialUsers = db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > datetime('now')").get().cnt;
+    const totalTickets = await db.prepare("SELECT COUNT(*) as cnt FROM tickets").get().cnt;
+    const resolvedTickets = await db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get().cnt;
+    const totalUsers = await db.prepare("SELECT COUNT(*) as cnt FROM users").get().cnt;
+    const freeTrialUsers = await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > datetime('now')").get().cnt;
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
     
-    const incomeRow = db.prepare("SELECT SUM(CAST(REPLACE(REPLACE(amount, '$', ''), ' USD / ₱', '') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
+    const incomeRow = await db.prepare("SELECT SUM(CAST(REPLACE(REPLACE(amount, '$', ''), ' USD / ₱', '') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
     const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0; // naive string parsing estimate
     
     const auditLogs = db.prepare(`
@@ -489,9 +489,9 @@ app.get("/", async (req, res, next) => {
     queryParams.push(req.user.company_id, req.user.id);
   }
 
-  const tickets = db.prepare(query).all(...queryParams);
+  const tickets = await db.prepare(query).all(...queryParams);
 
-  const users = db.prepare("SELECT id, name, role FROM users WHERE company_id = ? ORDER BY name").all(req.user.company_id);
+  const users = await db.prepare("SELECT id, name, role FROM users WHERE company_id = ? ORDER BY name").all(req.user.company_id);
   const ticketIds = tickets.map((ticket) => ticket.id);
   const commentsByTicketId = ticketIds.length
     ? await getCommentsByTicketId(ticketIds)
@@ -660,10 +660,10 @@ app.post("/tickets/:id/attachments/:attachmentId/delete", requireAuth, requireCo
   const attachmentId = Number(req.params.attachmentId);
   
   // Ensure the ticket belongs to the user's company
-  const ticket = db.prepare("SELECT id FROM tickets WHERE id = ? AND company_id = ?").get(ticketId, req.user.company_id);
+  const ticket = await db.prepare("SELECT id FROM tickets WHERE id = ? AND company_id = ?").get(ticketId, req.user.company_id);
   if (!ticket) return res.status(404).send("Ticket not found.");
 
-  const attachment = db.prepare("SELECT id, stored_name FROM attachments WHERE id = ? AND ticket_id = ?").get(attachmentId, ticketId);
+  const attachment = await db.prepare("SELECT id, stored_name FROM attachments WHERE id = ? AND ticket_id = ?").get(attachmentId, ticketId);
   if (!attachment) return res.status(404).send("Attachment not found.");
 
   await db.prepare("DELETE FROM attachments WHERE id = ?").run(attachmentId);
@@ -735,7 +735,7 @@ app.get("/search", requireAuth, requireCompanyActive, async (req, res) => {
     )
     .all(...params);
 
-  const users = db.prepare("SELECT id, name, role FROM users ORDER BY name").all();
+  const users = await db.prepare("SELECT id, name, role FROM users ORDER BY name").all();
   const ticketIds = tickets.map((ticket) => ticket.id);
   const commentsByTicketId = ticketIds.length
     ? await getCommentsByTicketId(ticketIds)
@@ -765,7 +765,7 @@ app.get("/audit-logs", requireAuth, requireAgent, requireCompanyActive, async (r
       return res.status(403).send("Audit logs are available on the Enterprise plan. Please upgrade.");
     }
   }
-  const logs = db.prepare("SELECT audit_logs.*, users.name as actor_name FROM audit_logs LEFT JOIN users ON users.id = audit_logs.actor_id WHERE audit_logs.company_id = ? ORDER BY audit_logs.id DESC LIMIT 100").all(req.user.company_id);
+  const logs = await db.prepare("SELECT audit_logs.*, users.name as actor_name FROM audit_logs LEFT JOIN users ON users.id = audit_logs.actor_id WHERE audit_logs.company_id = ? ORDER BY audit_logs.id DESC LIMIT 100").all(req.user.company_id);
   res.send(renderAuditLogs(logs, req.user));
 });
 
@@ -855,7 +855,7 @@ app.post("/tickets/:id/status", requireAuth, requireAgent, requireCompanyActive,
     return res.status(400).send("Invalid status.");
   }
 
-  const result = db.prepare("UPDATE tickets SET status = ? WHERE id = ? AND company_id = ?").run(status, id, req.user.company_id);
+  const result = await db.prepare("UPDATE tickets SET status = ? WHERE id = ? AND company_id = ?").run(status, id, req.user.company_id);
   if (result.changes === 0) {
     return res.status(404).send("Ticket not found.");
   }
@@ -953,9 +953,9 @@ app.post("/tickets/:id/delete", requireAuth, requireAgent, requireCompanyActive,
 
 
 app.get("/admin/companies/:id", requireAuth, requireSuperAdmin, async (req, res) => {
-  const company = db.prepare("SELECT * FROM companies WHERE id = ?").get(req.params.id);
+  const company = await db.prepare("SELECT * FROM companies WHERE id = ?").get(req.params.id);
   if (!company) return res.status(404).send("Company not found");
-  const plans = db.prepare("SELECT * FROM plans").all();
+  const plans = await db.prepare("SELECT * FROM plans").all();
   res.send(renderCompanyAdmin(company, plans, req.user));
 });
 
@@ -1090,7 +1090,7 @@ app.post("/c/:slug/join", async (req, res) => {
     return res.status(400).send("Name, email, and password are required.");
   }
 
-  const company = db.prepare("SELECT id, name, invite_required, allowed_domains FROM companies WHERE slug = ?").get(slug);
+  const company = await db.prepare("SELECT id, name, invite_required, allowed_domains FROM companies WHERE slug = ?").get(slug);
   if (!company) return res.status(404).send("Company not found.");
   
   if (company.invite_required) {
@@ -1105,7 +1105,7 @@ app.post("/c/:slug/join", async (req, res) => {
     }
   }
 
-  const existing = db.prepare("SELECT user_id FROM credentials WHERE email = ?").get(email);
+  const existing = await db.prepare("SELECT user_id FROM credentials WHERE email = ?").get(email);
   if (existing) return res.status(400).send("Email already in use.");
 
   const passwordHash = bcrypt.hashSync(password, 10);
@@ -1206,7 +1206,7 @@ app.post("/signup", async (req, res) => {
   );
 
   const transaction = db.transaction(async () => {
-    const companyId = createCompany.run(
+    const companyId = await createCompany.run(
       companyName,
       slug || slugify(companyName),
       inviteRequired,
@@ -1236,7 +1236,7 @@ app.get("/billing", requireAuth, async (req, res) => {
       "SELECT id, method, reference, amount, status, created_at FROM payment_requests WHERE company_id = ? ORDER BY id DESC"
     )
     .all(req.user.company_id);
-  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
+  const plans = await db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
 
   res.send(renderBilling(company, payments, plans, req.user));
 });
@@ -1255,7 +1255,7 @@ app.post("/billing/request", requireAuth, async (req, res) => {
   }
 
   // Get price from the selected plan
-  const plan = db.prepare("SELECT price_usd, price_php FROM plans WHERE code = ?").get(planCode);
+  const plan = await db.prepare("SELECT price_usd, price_php FROM plans WHERE code = ?").get(planCode);
   const amount = plan ? `$${plan.price_usd} USD / ₱${plan.price_php} PHP` : 'custom';
 
   // Update company plan
@@ -1273,7 +1273,7 @@ app.post("/billing/request", requireAuth, async (req, res) => {
 
 app.post("/billing/trial", requireAuth, async (req, res) => {
   const planCode = (req.body.plan || "starter").trim();
-  const company = db.prepare("SELECT id, trial_ends_at FROM companies WHERE id = ?").get(req.user.company_id);
+  const company = await db.prepare("SELECT id, trial_ends_at FROM companies WHERE id = ?").get(req.user.company_id);
 
   if (!company) {
     return res.status(400).send("Company not found.");
@@ -1295,7 +1295,7 @@ app.post("/webhooks/stripe", async (req, res) => {
   if (!reference) return res.status(400).send("Missing reference");
   
   if (status === "succeeded") {
-    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'stripe'").get(reference);
+    const request = await db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'stripe'").get(reference);
     if (request) {
       await db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
       await db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
@@ -1307,7 +1307,7 @@ app.post("/webhooks/stripe", async (req, res) => {
 app.post("/webhooks/paypal", async (req, res) => {
   const { reference, status } = req.body;
   if (status === "COMPLETED" && reference) {
-    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'paypal'").get(reference);
+    const request = await db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'paypal'").get(reference);
     if (request) {
       await db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
       await db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
@@ -1319,7 +1319,7 @@ app.post("/webhooks/paypal", async (req, res) => {
 app.post("/webhooks/gcash", async (req, res) => {
   const { reference, status } = req.body;
   if (status === "paid" && reference) {
-    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'gcash'").get(reference);
+    const request = await db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'gcash'").get(reference);
     if (request) {
       await db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
       await db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
