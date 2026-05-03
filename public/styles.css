@@ -241,13 +241,13 @@ textarea { resize: vertical; }
   background: var(--panel);
 }
 
-.ticket.bg-low { background: linear-gradient(180deg, rgba(226, 232, 240, 0.3), transparent); }
-.ticket.bg-medium { background: linear-gradient(180deg, rgba(254, 240, 138, 0.2), transparent); }
-.ticket.bg-high { background: linear-gradient(180deg, rgba(254, 202, 202, 0.2), transparent); }
+.ticket.bg-low { background: linear-gradient(180deg, rgba(226, 232, 240, 0.9), rgba(255, 255, 255, 0.4)); }
+.ticket.bg-medium { background: linear-gradient(180deg, rgba(254, 240, 138, 0.6), rgba(255, 255, 255, 0.4)); border-color: rgba(250, 204, 21, 0.5); }
+.ticket.bg-high { background: linear-gradient(180deg, rgba(254, 202, 202, 0.6), rgba(255, 255, 255, 0.4)); border-color: rgba(248, 113, 113, 0.5); }
 
-html.dark-mode .ticket.bg-low { background: linear-gradient(180deg, rgba(51, 65, 85, 0.3), transparent); }
-html.dark-mode .ticket.bg-medium { background: linear-gradient(180deg, rgba(133, 77, 14, 0.3), transparent); }
-html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(153, 27, 27, 0.3), transparent); }
+html.dark-mode .ticket.bg-low { background: linear-gradient(180deg, rgba(51, 65, 85, 0.8), rgba(30, 41, 59, 0.4)); }
+html.dark-mode .ticket.bg-medium { background: linear-gradient(180deg, rgba(161, 98, 7, 0.5), rgba(30, 41, 59, 0.4)); border-color: rgba(202, 138, 4, 0.5); }
+html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 28, 28, 0.5), rgba(30, 41, 59, 0.4)); border-color: rgba(220, 38, 38, 0.5); }
 
 .ticket-header { display: flex; justify-content: space-between; gap: 20px; }
 .ticket h3 { margin: 0 0 8px; font-size: 20px; }
