@@ -397,9 +397,15 @@ app.get("/", (req, res, next) => {
     `).all();
 
     const totalTickets = db.prepare("SELECT COUNT(*) as cnt FROM tickets").get().cnt;
+    const resolvedTickets = db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get().cnt;
     const totalUsers = db.prepare("SELECT COUNT(*) as cnt FROM users").get().cnt;
+    const freeTrialUsers = db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > datetime('now')").get().cnt;
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
+    
+    const incomeRow = db.prepare("SELECT SUM(CAST(REPLACE(REPLACE(amount, '$', ''), ' USD / ₱', '') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
+    const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0; // naive string parsing estimate
+    
     const auditLogs = db.prepare(`
       SELECT al.action, al.details, al.created_at, u.name as actor_name
       FROM audit_logs al
@@ -407,13 +413,25 @@ app.get("/", (req, res, next) => {
       ORDER BY al.created_at DESC LIMIT 20
     `).all();
 
+    const payments = db.prepare(`
+      SELECT pr.id, pr.method, pr.reference, pr.amount, pr.status, pr.created_at, c.name as company_name
+      FROM payment_requests pr
+      JOIN companies c ON c.id = pr.company_id
+      ORDER BY pr.id DESC
+      LIMIT 50
+    `).all();
+
     return res.send(renderSuperAdminDashboard({
       companies,
       totalTickets,
+      resolvedTickets,
       totalUsers,
+      freeTrialUsers,
+      totalIncomeUsd,
       activeCompanies,
       trialCompanies,
       auditLogs,
+      payments
     }, req.user));
   }
 
@@ -823,6 +841,48 @@ app.post("/tickets/:id/delete", requireAuth, requireAgent, requireCompanyActive,
   const id = Number(req.params.id);
   db.prepare("DELETE FROM tickets WHERE id = ?").run(id);
   logAudit(req.user.id, req.user.company_id, "ticket.delete", "ticket", id, "deleted");
+  res.redirect("/");
+});
+
+
+app.get("/admin/companies/:id", requireAuth, requireSuperAdmin, (req, res) => {
+  const company = db.prepare("SELECT * FROM companies WHERE id = ?").get(req.params.id);
+  if (!company) return res.status(404).send("Company not found");
+  const plans = db.prepare("SELECT * FROM plans").all();
+  res.send(renderCompanyAdmin(company, plans, req.user));
+});
+
+app.post("/admin/companies/:id/action", requireAuth, requireSuperAdmin, (req, res) => {
+  const id = req.params.id;
+  const action = req.body.action;
+  
+  if (action === "delete") {
+    const transaction = db.transaction(() => {
+      db.prepare("DELETE FROM tickets WHERE company_id = ?").run(id);
+      db.prepare("DELETE FROM audit_logs WHERE company_id = ?").run(id);
+      db.prepare("DELETE FROM users WHERE company_id = ?").run(id);
+      db.prepare("DELETE FROM payment_requests WHERE company_id = ?").run(id);
+      db.prepare("DELETE FROM companies WHERE id = ?").run(id);
+    });
+    transaction();
+    logAudit(req.user.id, 1, "admin.company_deleted", "company", id, "Company and all associated data deleted");
+    return res.redirect("/");
+  }
+
+  if (action === "update") {
+    const plan = req.body.plan;
+    const status = req.body.status;
+    let trialEndsAt = req.body.trial_ends_at || null;
+    
+    if (trialEndsAt) {
+      trialEndsAt = new Date(trialEndsAt).toISOString();
+    }
+    
+    db.prepare("UPDATE companies SET plan = ?, status = ?, trial_ends_at = ? WHERE id = ?").run(plan, status, trialEndsAt, id);
+    logAudit(req.user.id, 1, "admin.company_updated", "company", id, `Updated ${plan}, ${status}`);
+    return res.redirect("/");
+  }
+  
   res.redirect("/");
 });
 
@@ -1929,6 +1989,76 @@ function renderSignup(message = "") {
 }
 
 
+
+function renderCompanyAdmin(company, plans, currentUser) {
+  const planOptions = plans.map(p => 
+    `<option value="${p.code}" ${company.plan === p.code ? 'selected' : ''}>${escapeHtml(p.name)} (${p.price_usd})</option>`
+  ).join("");
+  
+  const statusOptions = ['active', 'pending', 'blocked', 'suspended'].map(s => 
+    `<option value="${s}" ${company.status === s ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
+  ).join("");
+  
+  const trialEnd = company.trial_ends_at ? new Date(company.trial_ends_at).toISOString().split('T')[0] : '';
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Manage ${escapeHtml(company.name)} · Platform Admin</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell">
+          <header class="topbar">
+            <div>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Manage Company</h2>
+              <p>Platform Admin</p>
+            </div>
+            <div class="top-actions">
+              <a class="ghost" href="/">Back to Dashboard</a>
+              <form action="/logout" method="post">
+                <button type="submit" class="ghost">Log out</button>
+              </form>
+            </div>
+          </header>
+
+          <section class="panel">
+            <h3>${escapeHtml(company.name)}</h3>
+            <form class="ticket-form" action="/admin/companies/${company.id}/action" method="post" style="max-width:600px;">
+              <div>
+                <label>Company Plan</label>
+                <select name="plan">
+                  ${planOptions}
+                  <option value="pending_plan" ${company.plan === 'pending_plan' ? 'selected' : ''}>Pending Selection</option>
+                </select>
+              </div>
+              <div>
+                <label>Account Status</label>
+                <select name="status">
+                  ${statusOptions}
+                </select>
+              </div>
+              <div>
+                <label>Trial Ends At</label>
+                <input type="date" name="trial_ends_at" value="${trialEnd}" />
+                <span style="font-size:12px;color:var(--muted);">Leave blank for no trial</span>
+              </div>
+              
+              <div class="full actions" style="display:flex; gap:16px;">
+                <button type="submit" name="action" value="update" class="primary-btn">Save Changes</button>
+                <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Are you sure you want to permanently delete this company and all its data? This cannot be undone.');">Delete Company</button>
+              </div>
+            </form>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
 function renderBillingGate(currentUser) {
   return `
     <!doctype html>
@@ -2131,12 +2261,12 @@ function renderBilling(company, payments, plans, currentUser) {
                   <option value="bank">Bank Transfer</option>
                 </select>
               </div>
-              <div>
+              <div id="reference-container" style="display:none;">
                 <label for="reference">Transaction Reference / ID</label>
-                <input id="reference" name="reference" placeholder="Paste your payment reference here" required />
+                <input id="reference" name="reference" placeholder="Paste your payment reference here" />
               </div>
               <div class="full actions">
-                <button type="submit">Submit Payment</button>
+                <button type="submit" id="submit-payment-btn">Proceed to Checkout</button>
               </div>
             </form>
             ${!company.trial_ends_at ? `
@@ -2177,6 +2307,23 @@ function renderBilling(company, payments, plans, currentUser) {
             document.getElementById('payment-section').style.display = '';
             document.getElementById('payment-section').scrollIntoView({ behavior: 'smooth' });
           }
+
+          document.getElementById('method').addEventListener('change', function(e) {
+            const method = e.target.value;
+            const refContainer = document.getElementById('reference-container');
+            const refInput = document.getElementById('reference');
+            const submitBtn = document.getElementById('submit-payment-btn');
+            
+            if (method === 'stripe' || method === 'paypal') {
+              refContainer.style.display = 'none';
+              refInput.required = false;
+              submitBtn.textContent = 'Proceed to Checkout';
+            } else {
+              refContainer.style.display = 'block';
+              refInput.required = true;
+              submitBtn.textContent = 'Submit Payment';
+            }
+          });
         </script>
       </body>
     </html>
@@ -2840,7 +2987,26 @@ function renderOption(value, current, label = value) {
 }
 
 function renderSuperAdminDashboard(data, currentUser) {
-  const { companies, totalTickets, totalUsers, activeCompanies, trialCompanies, auditLogs } = data;
+  const { companies, totalTickets, resolvedTickets, totalUsers, freeTrialUsers, totalIncomeUsd, activeCompanies, trialCompanies, auditLogs, payments } = data;
+
+  const paymentRows = (payments || []).map(p => `
+    <tr>
+      <td>${escapeHtml(p.company_name)}</td>
+      <td>${escapeHtml(p.method)}</td>
+      <td>${escapeHtml(p.reference || "")}</td>
+      <td>${escapeHtml(p.amount || "")}</td>
+      <td>${escapeHtml(p.status)}</td>
+      <td>${new Date(p.created_at).toLocaleString()}</td>
+      <td>
+        ${p.status === 'pending' ? `
+        <form action="/billing/verify" method="post" class="inline-form">
+          <input type="hidden" name="request_id" value="${p.id}" />
+          <button type="submit" style="padding:4px 8px;font-size:12px;">Verify Payment</button>
+        </form>
+        ` : '—'}
+      </td>
+    </tr>
+  `).join("");
 
   const companyRows = companies.map(c => {
     const statusColor = c.status === 'active' ? '#10b981' : c.status === 'pending' ? '#f59e0b' : '#ef4444';
@@ -2854,6 +3020,7 @@ function renderSuperAdminDashboard(data, currentUser) {
         <td>${c.ticket_count}</td>
         <td>${trialLabel}</td>
         <td>${new Date(c.created_at).toLocaleDateString()}</td>
+        <td><a href="/admin/companies/${c.id}" class="ghost" style="padding:4px 8px;font-size:12px;">Manage</a></td>
       </tr>
     `;
   }).join("");
@@ -2897,26 +3064,30 @@ function renderSuperAdminDashboard(data, currentUser) {
               <h1>Platform Dashboard</h1>
               <p class="subtitle">Monitor all companies, subscriptions, and system activity.</p>
             </div>
-            <div class="stats">
+            <div class="stats" style="display:flex; flex-wrap:wrap; gap:32px;">
+              <div>
+                <span class="stat">$${totalIncomeUsd || 0}</span>
+                <span class="label">Total Income</span>
+              </div>
               <div>
                 <span class="stat">${companies.length}</span>
                 <span class="label">Companies</span>
               </div>
               <div>
                 <span class="stat">${activeCompanies}</span>
-                <span class="label">Active</span>
+                <span class="label">Active Companies</span>
               </div>
               <div>
-                <span class="stat">${trialCompanies}</span>
-                <span class="label">On Trial</span>
+                <span class="stat">${freeTrialUsers}</span>
+                <span class="label">Free Trial Users</span>
               </div>
               <div>
                 <span class="stat">${totalUsers}</span>
                 <span class="label">Total Users</span>
               </div>
               <div>
-                <span class="stat">${totalTickets}</span>
-                <span class="label">Total Tickets</span>
+                <span class="stat">${resolvedTickets} / ${totalTickets}</span>
+                <span class="label">Resolved Tickets</span>
               </div>
             </div>
           </section>
@@ -2934,10 +3105,33 @@ function renderSuperAdminDashboard(data, currentUser) {
                     <th>Tickets</th>
                     <th>Trial Ends</th>
                     <th>Created</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${companyRows || "<tr><td colspan='7'>No companies yet.</td></tr>"}
+                  ${companyRows || "<tr><td colspan='8'>No companies found.</td></tr>"}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>Recent Payment Requests</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Method</th>
+                    <th>Reference</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${paymentRows || "<tr><td colspan='7'>No recent payment requests.</td></tr>"}
                 </tbody>
               </table>
             </div>
