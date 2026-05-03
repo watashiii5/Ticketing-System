@@ -2313,7 +2313,7 @@ function renderBilling(company, payments, plans, currentUser) {
     enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "SSO integration", "Custom SLA rules", "Audit logs"]
   };
 
-  const planCards = plans.map(p => {
+  let planCards = plans.map(p => {
     const isCurrent = company.plan === p.code;
     const featureList = (features[p.code] || ["Full access"]).map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
     return `
@@ -2329,6 +2329,26 @@ function renderBilling(company, payments, plans, currentUser) {
       </div>
     `;
   }).join("");
+
+  if (!company.trial_ends_at) {
+    const trialFeatures = features.starter.map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
+    planCards += `
+      <div style="flex:1;min-width:220px;border:2px solid var(--border);border-radius:12px;padding:24px;background:var(--panel);position:relative;">
+        <span style="position:absolute;top:-10px;right:16px;background:#f59e0b;color:white;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600;">30 Days Only</span>
+        <h3 style="margin:0 0 4px;">Free Trial</h3>
+        <div style="margin:12px 0;">
+          <span style="font-size:28px;font-weight:700;">$0</span><span style="color:var(--muted);font-size:14px;">/mo USD</span>
+        </div>
+        <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">No credit card required</div>
+        <ul style="list-style:none;padding:0;margin:0 0 16px;">${trialFeatures}</ul>
+        <form action="/billing/trial" method="post">
+          <input type="hidden" name="plan" value="starter" />
+          <button type="submit" class="ghost" style="width:100%;padding:10px;border:2px solid #f59e0b;color:#d97706;">Start Free Trial</button>
+        </form>
+      </div>
+    `;
+  }
+
 
   const trialInfo = company.trial_ends_at
     ? `<p style="font-size:14px;color:var(--muted);">Trial expires: ${new Date(company.trial_ends_at).toLocaleDateString()}</p>`
