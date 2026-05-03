@@ -782,25 +782,25 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, async (req,
   const compFilterAnd = isSuper ? "" : "AND company_id = ?";
   const params = isSuper ? [] : [req.user.company_id];
 
-  const total = await db
+  const total = Number((await db
     .prepare(`SELECT COUNT(*) as count FROM tickets ${compFilter}`)
-    .get(...params).count;
-  const open = await db
+    .get(...params))?.count ?? 0);
+  const open = Number((await db
     .prepare(`SELECT COUNT(*) as count FROM tickets WHERE status = 'open' ${compFilterAnd}`)
-    .get(...params).count;
-  const inProgress = await db
+    .get(...params))?.count ?? 0);
+  const inProgress = Number((await db
     .prepare(
       `SELECT COUNT(*) as count FROM tickets WHERE status = 'in_progress' ${compFilterAnd}`
     )
-    .get(...params).count;
-  const resolved = await db
+    .get(...params))?.count ?? 0);
+  const resolved = Number((await db
     .prepare(`SELECT COUNT(*) as count FROM tickets WHERE status = 'resolved' ${compFilterAnd}`)
-    .get(...params).count;
-  const overdue = await db
+    .get(...params))?.count ?? 0);
+  const overdue = Number((await db
     .prepare(
       `SELECT COUNT(*) as count FROM tickets WHERE sla_due_at IS NOT NULL AND sla_due_at < ? AND status != 'resolved' ${compFilterAnd}`
     )
-    .get(new Date().toISOString(), ...params).count;
+    .get(new Date().toISOString(), ...params))?.count ?? 0);
 
   const topPriorities = await db
     .prepare(
@@ -1657,16 +1657,6 @@ async function renderHome(
               ${rows || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
             </ul>
           </section>
-          <footer class="app-footer">
-            <div class="footer-inner">
-              <span>Built by watashiii5 • IT Ticketing Desk</span>
-              <div>
-                <a class="footer-link" href="https://github.com/watashiii5" target="_blank" rel="noreferrer">github.com/watashiii5</a>
-                <span> • </span>
-                <a class="footer-link" href="https://watashiii5.github.io/portfolio/" target="_blank" rel="noreferrer">watashiii5.github.io/portfolio</a>
-              </div>
-            </div>
-          </footer>
         </main>
         <script>
           const SCROLL_KEY = 'desk_scroll';
@@ -3869,6 +3859,16 @@ function renderPublicLanding() {
               <p>Track volume, SLA risk, and resolution trends with simple, readable analytics.</p>
             </div>
           </section>
+          <footer class="app-footer">
+            <div class="footer-inner">
+              <span>Built by watashiii5 • IT Ticketing Desk</span>
+              <div>
+                <a class="footer-link" href="https://github.com/watashiii5" target="_blank" rel="noreferrer">github.com/watashiii5</a>
+                <span> • </span>
+                <a class="footer-link" href="https://watashiii5.github.io/portfolio/" target="_blank" rel="noreferrer">watashiii5.github.io/portfolio</a>
+              </div>
+            </div>
+          </footer>
         </main>
       
     <script>
