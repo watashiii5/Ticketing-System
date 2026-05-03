@@ -412,7 +412,7 @@ app.get("/", async (req, res, next) => {
 
   // Super admin gets a completely different management dashboard
   if (isSuper) {
-    const companies = db.prepare(`
+    const companies = await db.prepare(`
       SELECT c.id, c.name, c.slug, c.status, c.plan, c.trial_ends_at, c.created_at,
         (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) as user_count,
         (SELECT COUNT(*) FROM tickets t WHERE t.company_id = c.id) as ticket_count
@@ -429,14 +429,14 @@ app.get("/", async (req, res, next) => {
     const incomeRow = await db.prepare("SELECT SUM(CAST(REPLACE(REPLACE(amount, '$', ''), ' USD / ₱', '') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
     const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0; // naive string parsing estimate
     
-    const auditLogs = db.prepare(`
+    const auditLogs = await db.prepare(`
       SELECT al.action, al.details, al.created_at, u.name as actor_name
       FROM audit_logs al
       LEFT JOIN users u ON u.id = al.actor_id
       ORDER BY al.created_at DESC LIMIT 20
     `).all();
 
-    const payments = db.prepare(`
+    const payments = await db.prepare(`
       SELECT pr.id, pr.method, pr.reference, pr.amount, pr.status, pr.created_at, c.name as company_name
       FROM payment_requests pr
       JOIN companies c ON c.id = pr.company_id
@@ -809,12 +809,12 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, async (req,
   const limits = getPlanLimits(plan);
   
   if (limits.advancedAnalytics) {
-    const avgResolutionTime = db.prepare(`
+    const avgResolutionTime = await db.prepare(`
       SELECT AVG(EXTRACT(EPOCH FROM (CASE WHEN status = 'resolved' THEN created_at::timestamp ELSE NOW() END) - created_at::timestamp) / 3600) * 24 as avg_hours
       FROM tickets ${compFilter}
     `).get(...params);
     
-    const ticketsByDay = db.prepare(`
+    const ticketsByDay = await db.prepare(`
       SELECT created_at::date as day, COUNT(*) as count
       FROM tickets ${compFilter}
       GROUP BY created_at::date
@@ -822,7 +822,7 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, async (req,
       LIMIT 14
     `).all(...params);
 
-    const agentPerformance = db.prepare(`
+    const agentPerformance = await db.prepare(`
       SELECT users.name, COUNT(tickets.id) as assigned_count,
         SUM(CASE WHEN tickets.status = 'resolved' THEN 1 ELSE 0 END) as resolved_count
       FROM users
