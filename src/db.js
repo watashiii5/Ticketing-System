@@ -16,7 +16,13 @@ const pool = new Pool({
 
 function convertPlaceholders(sql) {
   let idx = 0;
-  return sql.replace(/\?/g, () => `$${++idx}`);
+  let newSql = sql.replace(/\?/g, () => `$${++idx}`);
+  
+  if (/^\s*INSERT/i.test(newSql) && !/\bRETURNING\b/i.test(newSql)) {
+    newSql += " RETURNING id";
+  }
+  
+  return newSql;
 }
 
 const db = {
