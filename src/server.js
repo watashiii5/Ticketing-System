@@ -1214,13 +1214,13 @@ app.post("/signup", async (req, res) => {
   );
 
   const transaction = db.transaction(async () => {
-    const companyId = await createCompany.run(
+    const companyId = (await createCompany.run(
       companyName,
       slug || slugify(companyName),
       inviteRequired,
       finalDomains,
       now
-    ).lastInsertRowid;
+    )).lastInsertRowid;
     const userId = (await createUser.run(name, companyId)).lastInsertRowid;
     await createCred.run(userId, email, passwordHash);
     await logAudit(userId, companyId, "company.signup", "company", companyId, plan);
