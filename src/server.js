@@ -756,7 +756,8 @@ app.get("/search", requireAuth, requireCompanyActive, async (req, res) => {
       attachmentsByTicketId,
       { status, priority, term },
       req.user,
-      req.company
+      req.company,
+      ""
     )
   );
 });
@@ -1166,10 +1167,10 @@ app.post("/demo", async (req, res) => {
     await createCred.run(requesterId, `user@${slug}.test`, passwordHash);
 
     // Seed sample tickets from the requester
-    const ticketInsert = db.prepare("INSERT INTO tickets (title, description, company_id, user_id, status, priority, priority_confidence, priority_reason, created_at) VALUES (?, ?, ?, ?, 'open', ?, 1, 'demo', ?)");
-    await ticketInsert.run("Cannot access payroll", "I am getting a 403 error when accessing the payroll system. This is urgent.", companyId, requesterId, "high", now);
-    await ticketInsert.run("Need a new monitor", "My current monitor is flickering and gives me headaches.", companyId, requesterId, "low", now);
-    await ticketInsert.run("VPN not connecting", "I can't connect to the company VPN from home. Tried restarting.", companyId, requesterId, "medium", now);
+    const ticketInsert = db.prepare("INSERT INTO tickets (title, description, company_id, user_id, status, priority, priority_confidence, priority_reason, created_at, sla_due_at) VALUES (?, ?, ?, ?, 'open', ?, 1, 'demo', ?, ?)");
+    await ticketInsert.run("Cannot access payroll", "I am getting a 403 error when accessing the payroll system. This is urgent.", companyId, requesterId, "high", now, computeSlaDueAt("high"));
+    await ticketInsert.run("Need a new monitor", "My current monitor is flickering and gives me headaches.", companyId, requesterId, "low", now, computeSlaDueAt("low"));
+    await ticketInsert.run("VPN not connecting", "I can't connect to the company VPN from home. Tried restarting.", companyId, requesterId, "medium", now, computeSlaDueAt("medium"));
 
     return role === "agent" ? agentId : requesterId;
   });
@@ -1734,7 +1735,7 @@ async function renderHome(
 }
 
 async function getCommentsByTicketId(ticketIds) {
-  const placeholders = ticketIds.map((_, i) => `${i + 1}`).join(",");
+  const placeholders = ticketIds.map((_, i) => `$${i + 1}`).join(",");
   const rows = await db
     .prepare(
       `
@@ -1755,7 +1756,7 @@ async function getCommentsByTicketId(ticketIds) {
 }
 
 async function getAttachmentsByTicketId(ticketIds) {
-  const placeholders = ticketIds.map((_, i) => `${i + 1}`).join(",");
+  const placeholders = ticketIds.map((_, i) => `$${i + 1}`).join(",");
   const rows = await db
     .prepare(
       `

@@ -45,6 +45,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html.dark-mode body {
+  background: linear-gradient(180deg, rgba(8, 16, 18, 0.98), rgba(8, 16, 18, 0.95)), var(--surface) !important;
+  background-color: #0b1518 !important;
+}
+
+html.dark-mode {
+  background: #0b1518;
+}
+
+html.dark-mode .public-landing,
+html.dark-mode .login-shell,
+html.dark-mode .shell {
+  background: transparent;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -57,6 +72,13 @@ body::before {
   pointer-events: none;
 }
 
+html.dark-mode body::before {
+  background:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 45%),
+    radial-gradient(circle at 82% 0%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 48%),
+    radial-gradient(circle at 70% 80%, rgba(10, 16, 20, 0.75), transparent 45%);
+}
+
 h1, h2, h3, h4, .logo {
   font-family: "Space Grotesk", sans-serif;
   letter-spacing: -0.02em;
@@ -64,6 +86,27 @@ h1, h2, h3, h4, .logo {
 
 a {
   color: var(--accent);
+  text-decoration: none;
+}
+
+a.ghost,
+a.button,
+a.primary-btn,
+.top-actions a,
+.nav-links a,
+.landing-actions a,
+.tabs a {
+  text-decoration: none !important;
+}
+
+a.ghost:hover,
+a.button:hover,
+a.primary-btn:hover,
+.top-actions a:hover,
+.nav-links a:hover,
+.landing-actions a:hover,
+.tabs a:hover {
+  text-decoration: none !important;
 }
 
 a:focus-visible,
@@ -143,6 +186,7 @@ button.ghost, .ghost {
   color: var(--ink);
   border: 1px solid var(--border);
   box-shadow: none;
+  text-decoration: none;
 }
 button.ghost:hover, .ghost:hover {
   background: var(--panel);
@@ -526,6 +570,10 @@ body:not(.no-anim) .ticket {
 
 .notice { background: #e0f2fe; color: #0369a1; padding: 16px; border-radius: 12px; font-weight: 500; }
 .error { background: #fee2e2; color: #991b1b; padding: 16px; border-radius: 12px; font-weight: 500; }
+.helper a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .trial-banner { background: #fef08a; border: 1px solid #fde047; border-radius: 12px; padding: 16px 24px; color: #854d0e; display: flex; gap: 16px; align-items: center; justify-content: space-between; font-weight: 500; margin-bottom: 24px;}
 .trial-banner.overdue { background: #fecaca; border-color: #fca5a5; color: #991b1b; }
 
