@@ -2220,7 +2220,7 @@ function renderCompanySettings(company, currentUser) {
           <section class="panel">
             <h3>📎 Share Your Ticketing Portal</h3>
             <p class="subtitle">Share this unique URL with your employees so they can create accounts and submit tickets.</p>
-            <div style="display: flex; gap: 10px; align-items: center; background: var(--bg); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); margin: 12px 0;">
+            <div style="display: flex; gap: 10px; align-items: center; background: var(--surface); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); margin: 12px 0;">
               <code id="share-url" style="flex: 1; font-size: 14px; word-break: break-all;"></code>
               <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('share-url').textContent).then(()=>this.textContent='Copied!').catch(()=>{})" class="ghost" style="padding: 6px 14px; white-space: nowrap;">📋 Copy</button>
             </div>
@@ -2325,7 +2325,7 @@ function renderBilling(company, payments, plans, currentUser) {
         </div>
         <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">₱${p.price_php}/mo PHP</div>
         <ul style="list-style:none;padding:0;margin:0 0 16px;">${featureList}</ul>
-        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : `<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);box-shadow:none;">Active Plan</button>`}
+        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : `<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`}
       </div>
     `;
   }).join("");

@@ -39,6 +39,7 @@ body {
   background: var(--surface);
   background-attachment: fixed;
   line-height: 1.5;
+  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -109,14 +110,14 @@ button.danger { background: #ef4444; box-shadow: 0 4px 14px 0 rgba(239,68,68,0.4
 button.danger:hover { background: #dc2626; }
 
 button.ghost, .ghost {
-  background: rgba(255, 255, 255, 0.4);
+  background: color-mix(in srgb, var(--panel) 40%, transparent);
   color: var(--ink);
   border: 1px solid var(--border);
   box-shadow: none;
 }
 button.ghost:hover, .ghost:hover {
-  background: #fff;
-  border-color: #cbd5e1;
+  background: var(--panel);
+  border-color: var(--accent);
 }
 .ghost.primary {
   background: var(--accent); color: #fff; border:none;
@@ -196,7 +197,7 @@ textarea { resize: vertical; }
   padding: 12px 16px;
   border-radius: 12px;
   border: 1px dashed var(--border);
-  background: rgba(255,255,255,0.5);
+  background: var(--glass-bg);
   color: var(--muted);
 }
 
@@ -207,7 +208,7 @@ textarea { resize: vertical; }
 
 /* Hero Section */
 .hero {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 15%, #fff), color-mix(in srgb, var(--accent) 5%, #fff));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 15%, var(--panel)), color-mix(in srgb, var(--accent) 5%, var(--panel)));
   border-radius: 24px;
   padding: 40px;
   display: flex;
@@ -215,7 +216,7 @@ textarea { resize: vertical; }
   align-items: center;
   justify-content: space-between;
   box-shadow: var(--shadow-md);
-  border: 1px solid rgba(255,255,255,0.7);
+  border: 1px solid var(--glass-border);
   position: relative;
   overflow: hidden;
 }
@@ -297,13 +298,13 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
 .comment-block, .attachment-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
 .comment-block h4, .attachment-block h4 { margin: 0 0 16px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .comments { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 12px; }
-.comments li { background: #fff; border-radius: 16px; padding: 16px; border: 1px solid var(--border); }
+.comments li { background: var(--panel); border-radius: 16px; padding: 16px; border: 1px solid var(--border); }
 .comments li span { display: block; font-size: 12px; color: var(--muted); margin-top: 8px; font-weight: 500; }
 .comment-form { display: flex; gap: 12px; }
 .comment-form input { border-radius: 999px; }
 
 .attachments { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 12px; }
-.attachments li { display: flex; justify-content: space-between; font-size: 14px; background: rgba(255,255,255,0.5); padding: 12px; border-radius: 12px; border: 1px solid var(--border); }
+.attachments li { display: flex; justify-content: space-between; font-size: 14px; background: var(--glass-bg); padding: 12px; border-radius: 12px; border: 1px solid var(--border); }
 .attachment-form { display: flex; gap: 12px; align-items: center; }
 .attachment-form input { border-radius: 999px; padding: 8px 16px; width: auto; }
 
@@ -313,7 +314,7 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
 .public-nav .logo { font-size: 26px; font-weight: 800; background: linear-gradient(to right, var(--ink), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .nav-links { display: flex; gap: 16px; }
 .public-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; padding: 100px 0 120px; }
-.public-hero h1 { font-size: 64px; line-height: 1.1; margin-bottom: 24px; background: linear-gradient(to right, #0f172a, #334155); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.public-hero h1 { font-size: 64px; line-height: 1.1; margin-bottom: 24px; background: linear-gradient(to right, var(--ink), color-mix(in srgb, var(--ink) 60%, transparent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .public-hero p { font-size: 20px; color: var(--muted); margin-bottom: 40px; }
 .cta-group { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
 .glow-btn { font-size: 18px; padding: 18px 36px; border-radius: 999px; background: linear-gradient(45deg, var(--accent), #2563eb); box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 50%, transparent); }
@@ -322,10 +323,10 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
 
 /* Mockup UI */
 .glass-mockup {
-  background: rgba(255, 255, 255, 0.4);
+  background: color-mix(in srgb, var(--panel) 40%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--glass-border);
   border-radius: 24px;
   padding: 24px;
   box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.2);
@@ -338,7 +339,7 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
 .dot:nth-child(1) { background: #ef4444; }
 .dot:nth-child(2) { background: #f59e0b; }
 .dot:nth-child(3) { background: #10b981; }
-.mockup-ticket { background: #fff; padding: 20px; border-radius: 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-sm); }
+.mockup-ticket { background: var(--panel); padding: 20px; border-radius: 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--shadow-sm); }
 .mockup-title { font-weight: 600; font-size: 16px; }
 
 .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 32px; padding-bottom: 120px; }
@@ -352,9 +353,9 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
   min-height: 100vh;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at top left, #e0e7ff, transparent 40%),
-              radial-gradient(circle at bottom right, #fce7f3, transparent 40%),
-              #f8fafc;
+  background: radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 15%, transparent), transparent 40%),
+              radial-gradient(circle at bottom right, color-mix(in srgb, var(--accent) 10%, transparent), transparent 40%),
+              var(--surface);
 }
 .login-panel { max-width: 480px; width: 100%; }
 .login-panel h1 { margin: 0 0 12px; font-size: 32px; }
@@ -379,14 +380,14 @@ html.dark-mode .ticket.bg-high { background: linear-gradient(180deg, rgba(185, 2
 table { width: 100%; border-collapse: separate; border-spacing: 0; }
 th, td { text-align: left; padding: 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
 th { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 12px; }
-.table-wrap { width: 100%; overflow-x: auto; background: #fff; border-radius: 16px; border: 1px solid var(--border); }
+.table-wrap { width: 100%; overflow-x: auto; background: var(--panel); border-radius: 16px; border: 1px solid var(--border); }
 
 .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; }
-.report-card { background: #fff; border-radius: 16px; padding: 24px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.report-card { background: var(--panel); border-radius: 16px; padding: 24px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .report-card h4 { margin: 0 0 12px; font-size: 12px; }
 .report-card p { margin: 0; font-size: 36px; font-weight: 800; color: var(--accent); }
 .report-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-.report-list li { background: #fff; padding: 16px; border-radius: 12px; border: 1px solid var(--border); }
+.report-list li { background: var(--panel); padding: 16px; border-radius: 12px; border: 1px solid var(--border); }
 
 .empty { text-align: center; color: var(--muted); padding: 40px 0; font-style: italic; }
 
