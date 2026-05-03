@@ -553,6 +553,12 @@ body:not(.no-anim) .ticket {
               radial-gradient(circle at bottom right, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 40%),
               var(--surface);
 }
+
+html.dark-mode .login-shell {
+  background: radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 18%, transparent), transparent 45%),
+              radial-gradient(circle at bottom right, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 48%),
+              var(--surface);
+}
 .login-panel { max-width: 480px; width: 100%; }
 .login-panel h1 { margin: 0 0 12px; font-size: 32px; }
 
