@@ -1,5 +1,7 @@
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
+const { AsyncLocalStorage } = require("async_hooks");
+const transactionCtx = new AsyncLocalStorage();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -30,26 +32,26 @@ const db = {
     const pgSql = convertPlaceholders(sql);
     return {
       async run(...params) {
-        const result = await pool.query(pgSql, params);
+        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
         return { lastInsertRowid: result.rows[0]?.id, changes: result.rowCount };
       },
       async get(...params) {
-        const result = await pool.query(pgSql, params);
+        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
         return result.rows[0] || null;
       },
       async all(...params) {
-        const result = await pool.query(pgSql, params);
+        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
         return result.rows;
       },
     };
   },
 
   async exec(sql) {
-    await pool.query(sql);
+    await (transactionCtx.getStore() || pool).query(sql);
   },
 
   async query(sql, params = []) {
-    const result = await pool.query(sql, params);
+    const result = await (transactionCtx.getStore() || pool).query(sql, params);
     return result;
   },
 
@@ -59,8 +61,12 @@ const db = {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await fn(...args);
+        // Run the function inside the AsyncLocalStorage context
+        const result = await transactionCtx.run(client, async () => {
+          return await fn(...args);
+        });
         await client.query("COMMIT");
+        return result;
       } catch (e) {
         await client.query("ROLLBACK");
         throw e;
@@ -84,18 +90,18 @@ db.prepare = function (sql) {
 
   return {
     async run(...params) {
-      const result = await pool.query(isInsert ? pgSqlReturning : pgSql, params);
+      const result = await (transactionCtx.getStore() || pool).query(isInsert ? pgSqlReturning : pgSql, params);
       return {
         lastInsertRowid: result.rows[0]?.id ?? null,
         changes: result.rowCount,
       };
     },
     async get(...params) {
-      const result = await pool.query(pgSql, params);
+      const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
       return result.rows[0] || null;
     },
     async all(...params) {
-      const result = await pool.query(pgSql, params);
+      const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
       return result.rows;
     },
   };
@@ -103,7 +109,7 @@ db.prepare = function (sql) {
 
 // ── Schema creation ──────────────────────────────────────────────
 async function initializeDatabase() {
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS companies (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -119,7 +125,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS tickets (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -136,7 +142,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -145,7 +151,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS credentials (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL UNIQUE,
@@ -154,7 +160,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS comments (
       id SERIAL PRIMARY KEY,
       ticket_id INTEGER NOT NULL,
@@ -164,7 +170,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS attachments (
       id SERIAL PRIMARY KEY,
       ticket_id INTEGER NOT NULL,
@@ -177,7 +183,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id SERIAL PRIMARY KEY,
       actor_id INTEGER,
@@ -190,7 +196,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS payment_requests (
       id SERIAL PRIMARY KEY,
       company_id INTEGER NOT NULL,
@@ -204,7 +210,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS invites (
       id SERIAL PRIMARY KEY,
       company_id INTEGER NOT NULL,
@@ -216,7 +222,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS reset_tokens (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -226,7 +232,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await pool.query(`
+  await (transactionCtx.getStore() || pool).query(`
     CREATE TABLE IF NOT EXISTS plans (
       id SERIAL PRIMARY KEY,
       code TEXT NOT NULL UNIQUE,
@@ -238,65 +244,65 @@ async function initializeDatabase() {
   `);
 
   // ── Seed data ────────────────────────────────────────────────
-  const companyCount = (await pool.query("SELECT COUNT(*) as count FROM companies")).rows[0].count;
+  const companyCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM companies")).rows[0].count;
   if (parseInt(companyCount) === 0) {
-    await pool.query(
+    await (transactionCtx.getStore() || pool).query(
       "INSERT INTO companies (name, status, plan, created_at) VALUES ($1, $2, $3, $4)",
       ["Acme", "active", "starter", new Date().toISOString()]
     );
   }
 
-  await pool.query(
+  await (transactionCtx.getStore() || pool).query(
     "UPDATE companies SET slug = LOWER(REPLACE(name, ' ', '-')) WHERE slug IS NULL"
   );
 
-  const userCount = (await pool.query("SELECT COUNT(*) as count FROM users")).rows[0].count;
+  const userCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM users")).rows[0].count;
   if (parseInt(userCount) === 0) {
-    await pool.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Avery Kim", "requester"]);
-    await pool.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Jordan Lee", "requester"]);
-    await pool.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Riley Patel", "requester"]);
-    await pool.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Morgan Diaz", "agent"]);
-    await pool.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Casey Ortiz", "agent"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Avery Kim", "requester"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Jordan Lee", "requester"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Riley Patel", "requester"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Morgan Diaz", "agent"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Casey Ortiz", "agent"]);
   }
 
-  const firstCompany = (await pool.query("SELECT id FROM companies ORDER BY id LIMIT 1")).rows[0];
+  const firstCompany = (await (transactionCtx.getStore() || pool).query("SELECT id FROM companies ORDER BY id LIMIT 1")).rows[0];
   if (firstCompany) {
-    await pool.query("UPDATE users SET company_id = $1 WHERE company_id IS NULL AND role != 'super_admin'", [firstCompany.id]);
-    await pool.query("UPDATE tickets SET company_id = $1 WHERE company_id IS NULL", [firstCompany.id]);
+    await (transactionCtx.getStore() || pool).query("UPDATE users SET company_id = $1 WHERE company_id IS NULL AND role != 'super_admin'", [firstCompany.id]);
+    await (transactionCtx.getStore() || pool).query("UPDATE tickets SET company_id = $1 WHERE company_id IS NULL", [firstCompany.id]);
   }
 
-  const credentialCount = (await pool.query("SELECT COUNT(*) as count FROM credentials")).rows[0].count;
+  const credentialCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM credentials")).rows[0].count;
   if (parseInt(credentialCount) === 0) {
-    const users = (await pool.query("SELECT id, name, role FROM users")).rows;
+    const users = (await (transactionCtx.getStore() || pool).query("SELECT id, name, role FROM users")).rows;
     const passwordHash = "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq";
     for (const user of users) {
       const email = `${user.name.toLowerCase().replace(/\s+/g, ".")}@acme.test`;
-      await pool.query(
+      await (transactionCtx.getStore() || pool).query(
         "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
         [user.id, email, passwordHash]
       );
     }
   }
 
-  const superAdmin = (await pool.query("SELECT id FROM users WHERE role = 'super_admin'")).rows[0];
+  const superAdmin = (await (transactionCtx.getStore() || pool).query("SELECT id FROM users WHERE role = 'super_admin'")).rows[0];
   if (!superAdmin) {
-    await pool.query("DELETE FROM credentials WHERE email = 'admin@platform.test'");
-    const result = await pool.query(
+    await (transactionCtx.getStore() || pool).query("DELETE FROM credentials WHERE email = 'admin@platform.test'");
+    const result = await (transactionCtx.getStore() || pool).query(
       "INSERT INTO users (name, role, company_id) VALUES ($1, $2, NULL) RETURNING id",
       ["Platform Admin", "super_admin"]
     );
     const superId = result.rows[0].id;
-    await pool.query(
+    await (transactionCtx.getStore() || pool).query(
       "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
       [superId, "admin@platform.test", "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq"]
     );
   }
 
-  const planCount = (await pool.query("SELECT COUNT(*) as count FROM plans")).rows[0].count;
+  const planCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM plans")).rows[0].count;
   if (parseInt(planCount) === 0) {
-    await pool.query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["starter", "Starter", 29, 1499, "🌱"]);
-    await pool.query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["growth", "Growth", 99, 4999, "🚀"]);
-    await pool.query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["enterprise", "Enterprise", 299, 14999, "🏢"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["starter", "Starter", 29, 1499, "🌱"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["growth", "Growth", 99, 4999, "🚀"]);
+    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["enterprise", "Enterprise", 299, 14999, "🏢"]);
   }
 
   console.log("Database initialized successfully.");
