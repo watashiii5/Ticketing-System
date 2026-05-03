@@ -1340,7 +1340,7 @@ function renderHome(
         }">
           <header class="topbar">
             <div>
-              <h2>${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> ${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
             </div>
             <div class="top-actions">
@@ -1416,7 +1416,7 @@ function renderHome(
           </section>
 
           <section class="panel">
-            <h2>Queue</h2>
+            <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Queue</h2>
             <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
               <a href="/?tab=active" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'active' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'active' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Active Tickets</a>
               <a href="/?tab=resolved" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'resolved' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'resolved' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Resolved Tickets</a>
@@ -1839,7 +1839,7 @@ function renderLogin(error = "") {
       <body>
         <main class="shell login-shell">
           <section class="panel login-panel">
-            <h1>Sign in</h1>
+            <h1 style="display:flex;align-items:center;gap:12px;justify-content:center;"><img src="/static/logo.png" alt="Logo" style="height:36px;border-radius:8px;"> Sign in</h1>
             <p class="subtitle">Access your company's service desk.</p>
             ${error ? `<p class=\"error\">${escapeHtml(error)}</p>` : ""}
             <form class="login-form" action="/login" method="post">
@@ -1885,7 +1885,7 @@ function renderSignup(message = "") {
       <body>
         <main class="shell login-shell">
           <section class="panel login-panel">
-            <h1>Create company account</h1>
+            <h1 style="display:flex;align-items:center;gap:12px;justify-content:center;"><img src="/static/logo.png" alt="Logo" style="height:36px;border-radius:8px;"> Create company account</h1>
             <p class="subtitle">Start with a 1-click setup. Payment is required before access.</p>
             ${message ? `<p class=\"notice\">${escapeHtml(message)}</p>` : ""}
             <form class="login-form" action="/signup" method="post">
@@ -1970,7 +1970,7 @@ function renderCompanySettings(company, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Company settings</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Company settings</h2>
               <p>${escapeHtml(company.name)} • Plan: ${escapeHtml((company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1))}</p>
             </div>
             <div class="top-actions">
@@ -2069,7 +2069,7 @@ function renderBilling(company, payments, plans, currentUser) {
         </div>
         <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">₱${p.price_php}/mo PHP</div>
         <ul style="list-style:none;padding:0;margin:0 0 16px;">${featureList}</ul>
-        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : '<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--bg);">Active Plan</button>'}
+        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : `<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--muted);box-shadow:none;">Active Plan</button>`}
       </div>
     `;
   }).join("");
@@ -2093,7 +2093,7 @@ function renderBilling(company, payments, plans, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Billing & Plans</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Billing & Plans</h2>
               <p>${escapeHtml(company.name)} • Status: <strong style="text-transform:capitalize;">${escapeHtml(company.status)}</strong> • Plan: <strong>${escapeHtml(planName)}</strong></p>
               ${trialInfo}
             </div>
@@ -2308,7 +2308,7 @@ function renderPlatformAdmin(companies, payments, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Platform Admin</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Platform Admin</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)}</p>
             </div>
             <div class="top-actions">
@@ -2471,7 +2471,7 @@ function renderUserAdmin(users, invites, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>User Admin</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> User Admin</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
             </div>
             <div class="top-actions">
@@ -2619,7 +2619,7 @@ function renderAdminPlans(plans, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Manage Pricing Plans</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Manage Pricing Plans</h2>
               <p>Platform Admin Settings</p>
             </div>
             <div class="top-actions">
@@ -2684,7 +2684,7 @@ function renderReports(metrics, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Reports</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Reports</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
             </div>
             <div class="top-actions">
@@ -2880,7 +2880,7 @@ function renderSuperAdminDashboard(data, currentUser) {
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>⚙️ Platform Admin</h2>
+              <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> ⚙️ Platform Admin</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (super_admin)</p>
             </div>
             <div class="top-actions">
@@ -2922,7 +2922,7 @@ function renderSuperAdminDashboard(data, currentUser) {
           </section>
 
           <section class="panel">
-            <h2>All Companies</h2>
+            <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> All Companies</h2>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -2944,7 +2944,7 @@ function renderSuperAdminDashboard(data, currentUser) {
           </section>
 
           <section class="panel">
-            <h2>Recent Audit Log</h2>
+            <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Recent Audit Log</h2>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -2980,7 +2980,7 @@ function renderPublicLanding() {
       <body>
         <main class="public-landing">
           <nav class="public-nav">
-            <div class="logo">Service Desk</div>
+            <div class="logo" style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:36px;border-radius:8px;">Service Desk</div>
             <div class="nav-links">
               <a class="ghost" href="/login">Sign in</a>
               <a class="ghost" href="/signup">Pricing</a>
