@@ -214,4 +214,25 @@ function ensureColumn(table, column, definition) {
   }
 }
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    price_usd INTEGER NOT NULL,
+    price_php INTEGER NOT NULL,
+    icon TEXT
+  );
+`);
+
+const planCount = db.prepare("SELECT COUNT(*) as count FROM plans").get().count;
+if (planCount === 0) {
+  const insertPlan = db.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)");
+  db.transaction(() => {
+    insertPlan.run("starter", "Starter", 29, 1499, "🌱");
+    insertPlan.run("growth", "Growth", 99, 4999, "🚀");
+    insertPlan.run("enterprise", "Enterprise", 299, 14999, "🏢");
+  })();
+}
+
 module.exports = db;

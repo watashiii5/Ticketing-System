@@ -50,7 +50,7 @@ app.use((req, res, next) => {
   req.user = user || null;
   if (req.user && req.user.company_id) {
     req.company = db
-      .prepare("SELECT id, name, slug, brand_color, logo_url, invite_required, allowed_domains, status FROM companies WHERE id = ?")
+      .prepare("SELECT id, name, slug, brand_color, logo_url, invite_required, allowed_domains, status, plan, trial_ends_at FROM companies WHERE id = ?")
       .get(req.user.company_id);
   } else {
     req.company = null;
@@ -239,6 +239,24 @@ app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActi
   res.redirect("/admin/users");
 });
 
+app.get("/admin/plans", requireAuth, requireSuperAdmin, (req, res) => {
+  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
+  res.send(renderAdminPlans(plans, req.user));
+});
+
+app.post("/admin/plans/:id", requireAuth, requireSuperAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  const price_usd = Number(req.body.price_usd);
+  const price_php = Number(req.body.price_php);
+  
+  if (isNaN(price_usd) || isNaN(price_php)) {
+    return res.status(400).send("Prices must be valid numbers");
+  }
+
+  db.prepare("UPDATE plans SET price_usd = ?, price_php = ? WHERE id = ?").run(price_usd, price_php, id);
+  res.redirect("/admin/plans");
+});
+
 app.post("/admin/invites", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
   const email = (req.body.email || "").trim().toLowerCase();
   const role = (req.body.role || "requester").trim();
@@ -356,35 +374,78 @@ app.post("/logout", (req, res) => {
   });
 });
 
-app.get("/", requireAuth, requireCompanyActive, (req, res) => {
-  const scopeClause = req.user.role === "agent" ? "" : "AND tickets.user_id = ?";
-  const scopeParams = req.user.role === "agent" ? [] : [req.user.id];
-  const tickets = db
-    .prepare(
-      `
-        SELECT
-          tickets.id,
-          tickets.title,
-          tickets.description,
-          tickets.status,
-          tickets.priority,
-          tickets.priority_confidence,
-          tickets.priority_reason,
-          tickets.sla_due_at,
-          tickets.created_at,
-          requester.name as requester_name,
-          requester.role as requester_role,
-          assignee.name as assignee_name
-        FROM tickets
-        LEFT JOIN users requester ON requester.id = tickets.user_id
-        LEFT JOIN users assignee ON assignee.id = tickets.assignee_id
-        WHERE tickets.company_id = ? ${scopeClause}
-        ORDER BY tickets.id DESC
-      `
-    )
-    .all(req.user.company_id, ...scopeParams);
+app.get("/", (req, res, next) => {
+  if (!req.user) {
+    return res.send(renderPublicLanding());
+  }
+  next();
+}, requireCompanyActive, (req, res) => {
+  const isSuper = req.user.role === "super_admin";
 
-  const users = db.prepare("SELECT id, name, role FROM users ORDER BY name").all();
+  // Super admin gets a completely different management dashboard
+  if (isSuper) {
+    const companies = db.prepare(`
+      SELECT c.id, c.name, c.slug, c.status, c.plan, c.trial_ends_at, c.created_at,
+        (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) as user_count,
+        (SELECT COUNT(*) FROM tickets t WHERE t.company_id = c.id) as ticket_count
+      FROM companies c ORDER BY c.created_at DESC
+    `).all();
+
+    const totalTickets = db.prepare("SELECT COUNT(*) as cnt FROM tickets").get().cnt;
+    const totalUsers = db.prepare("SELECT COUNT(*) as cnt FROM users").get().cnt;
+    const activeCompanies = companies.filter(c => c.status === "active").length;
+    const trialCompanies = companies.filter(c => c.status === "pending").length;
+    const auditLogs = db.prepare(`
+      SELECT al.action, al.details, al.created_at, u.name as actor_name
+      FROM audit_logs al
+      LEFT JOIN users u ON u.id = al.actor_id
+      ORDER BY al.created_at DESC LIMIT 20
+    `).all();
+
+    return res.send(renderSuperAdminDashboard({
+      companies,
+      totalTickets,
+      totalUsers,
+      activeCompanies,
+      trialCompanies,
+      auditLogs,
+    }, req.user));
+  }
+
+  const isAgent = req.user.role === "agent";
+  
+  let query = `
+    SELECT
+      tickets.id,
+      tickets.title,
+      tickets.description,
+      tickets.status,
+      tickets.priority,
+      tickets.priority_confidence,
+      tickets.priority_reason,
+      tickets.sla_due_at,
+      tickets.created_at,
+      tickets.assignee_id,
+      requester.name as requester_name,
+      requester.role as requester_role,
+      assignee.name as assignee_name
+    FROM tickets
+    LEFT JOIN users requester ON requester.id = tickets.user_id
+    LEFT JOIN users assignee ON assignee.id = tickets.assignee_id
+  `;
+  let queryParams = [];
+
+  if (isAgent) {
+    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC";
+    queryParams.push(req.user.company_id);
+  } else {
+    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC";
+    queryParams.push(req.user.company_id, req.user.id);
+  }
+
+  const tickets = db.prepare(query).all(...queryParams);
+
+  const users = db.prepare("SELECT id, name, role FROM users WHERE company_id = ? ORDER BY name").all(req.user.company_id);
   const ticketIds = tickets.map((ticket) => ticket.id);
   const commentsByTicketId = ticketIds.length
     ? getCommentsByTicketId(ticketIds)
@@ -399,7 +460,7 @@ app.get("/", requireAuth, requireCompanyActive, (req, res) => {
       users,
       commentsByTicketId,
       attachmentsByTicketId,
-      null,
+      { tab: req.query.tab || 'active' },
       req.user,
       req.company
     )
@@ -426,6 +487,8 @@ app.post("/tickets", requireAuth, requireCompanyActive, (req, res) => {
   const slaDueAt = rawSla
     ? new Date(rawSla).toISOString()
     : computeSlaDueAt(priority);
+  const companyIdForTicket = req.user.role === "super_admin" ? 1 : req.user.company_id;
+  
   const result = db
     .prepare(
       "INSERT INTO tickets (title, description, company_id, user_id, status, priority, priority_confidence, priority_reason, sla_due_at, created_at) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)"
@@ -433,7 +496,7 @@ app.post("/tickets", requireAuth, requireCompanyActive, (req, res) => {
     .run(
       title,
       description,
-      req.user.company_id,
+      companyIdForTicket,
       requesterId,
       priority,
       priorityResult.confidence,
@@ -520,6 +583,28 @@ app.post(
   }
 );
 
+app.post("/tickets/:id/attachments/:attachmentId/delete", requireAuth, requireCompanyActive, (req, res) => {
+  const ticketId = Number(req.params.id);
+  const attachmentId = Number(req.params.attachmentId);
+  
+  // Ensure the ticket belongs to the user's company
+  const ticket = db.prepare("SELECT id FROM tickets WHERE id = ? AND company_id = ?").get(ticketId, req.user.company_id);
+  if (!ticket) return res.status(404).send("Ticket not found.");
+
+  const attachment = db.prepare("SELECT id, stored_name FROM attachments WHERE id = ? AND ticket_id = ?").get(attachmentId, ticketId);
+  if (!attachment) return res.status(404).send("Attachment not found.");
+
+  db.prepare("DELETE FROM attachments WHERE id = ?").run(attachmentId);
+
+  // Try to delete the file from disk
+  const fs = require("fs");
+  const filePath = path.join(__dirname, "..", "uploads", attachment.stored_name);
+  try { fs.unlinkSync(filePath); } catch {}
+
+  logAudit(req.user.id, req.user.company_id, "ticket.attachment.delete", "attachment", attachmentId, attachment.stored_name);
+  res.redirect("/");
+});
+
 app.get("/search", requireAuth, requireCompanyActive, (req, res) => {
   const status = (req.query.status || "all").trim();
   const priority = (req.query.priority || "all").trim();
@@ -543,9 +628,14 @@ app.get("/search", requireAuth, requireCompanyActive, (req, res) => {
     params.push(`%${term}%`, `%${term}%`);
   }
 
-  if (req.user.role !== "agent") {
+  if (req.user.role !== "agent" && req.user.role !== "super_admin") {
     filters.push("tickets.user_id = ?");
     params.push(req.user.id);
+  }
+
+  if (req.user.role !== "super_admin") {
+    filters.push("tickets.company_id = ?");
+    params.push(req.user.company_id);
   }
 
   const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
@@ -567,12 +657,11 @@ app.get("/search", requireAuth, requireCompanyActive, (req, res) => {
         FROM tickets
         LEFT JOIN users requester ON requester.id = tickets.user_id
         LEFT JOIN users assignee ON assignee.id = tickets.assignee_id
-        ${filters.length ? "AND" : "WHERE"} tickets.company_id = ?
         ${whereClause}
         ORDER BY tickets.id DESC
       `
     )
-    .all(...params, req.user.company_id);
+    .all(...params);
 
   const users = db.prepare("SELECT id, name, role FROM users ORDER BY name").all();
   const ticketIds = tickets.map((ticket) => ticket.id);
@@ -597,31 +686,36 @@ app.get("/search", requireAuth, requireCompanyActive, (req, res) => {
 });
 
 app.get("/reports", requireAuth, requireAgent, requireCompanyActive, (req, res) => {
+  const isSuper = req.user.role === "super_admin";
+  const compFilter = isSuper ? "" : "WHERE company_id = ?";
+  const compFilterAnd = isSuper ? "" : "AND company_id = ?";
+  const params = isSuper ? [] : [req.user.company_id];
+
   const total = db
-    .prepare("SELECT COUNT(*) as count FROM tickets WHERE company_id = ?")
-    .get(req.user.company_id).count;
+    .prepare(`SELECT COUNT(*) as count FROM tickets ${compFilter}`)
+    .get(...params).count;
   const open = db
-    .prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'open' AND company_id = ?")
-    .get(req.user.company_id).count;
+    .prepare(`SELECT COUNT(*) as count FROM tickets WHERE status = 'open' ${compFilterAnd}`)
+    .get(...params).count;
   const inProgress = db
     .prepare(
-      "SELECT COUNT(*) as count FROM tickets WHERE status = 'in_progress' AND company_id = ?"
+      `SELECT COUNT(*) as count FROM tickets WHERE status = 'in_progress' ${compFilterAnd}`
     )
-    .get(req.user.company_id).count;
+    .get(...params).count;
   const resolved = db
-    .prepare("SELECT COUNT(*) as count FROM tickets WHERE status = 'resolved' AND company_id = ?")
-    .get(req.user.company_id).count;
+    .prepare(`SELECT COUNT(*) as count FROM tickets WHERE status = 'resolved' ${compFilterAnd}`)
+    .get(...params).count;
   const overdue = db
     .prepare(
-      "SELECT COUNT(*) as count FROM tickets WHERE sla_due_at IS NOT NULL AND sla_due_at < ? AND status != 'resolved' AND company_id = ?"
+      `SELECT COUNT(*) as count FROM tickets WHERE sla_due_at IS NOT NULL AND sla_due_at < ? AND status != 'resolved' ${compFilterAnd}`
     )
-    .get(new Date().toISOString(), req.user.company_id).count;
+    .get(new Date().toISOString(), ...params).count;
 
   const topPriorities = db
     .prepare(
-      "SELECT priority, COUNT(*) as count FROM tickets WHERE company_id = ? GROUP BY priority ORDER BY count DESC"
+      `SELECT priority, COUNT(*) as count FROM tickets ${compFilter} GROUP BY priority ORDER BY count DESC`
     )
-    .all(req.user.company_id);
+    .all(...params);
 
   res.send(
     renderReports(
@@ -640,7 +734,10 @@ app.post("/tickets/:id/status", requireAuth, requireAgent, requireCompanyActive,
     return res.status(400).send("Invalid status.");
   }
 
-  db.prepare("UPDATE tickets SET status = ? WHERE id = ?").run(status, id);
+  const result = db.prepare("UPDATE tickets SET status = ? WHERE id = ? AND company_id = ?").run(status, id, req.user.company_id);
+  if (result.changes === 0) {
+    return res.status(404).send("Ticket not found.");
+  }
   notifyTicketStatus(id, status, req.user);
   logAudit(req.user.id, req.user.company_id, "ticket.status", "ticket", id, status);
   res.redirect("/");
@@ -658,8 +755,8 @@ app.post("/tickets/:id/priority", requireAuth, requireAgent, requireCompanyActiv
 
   const slaDueAt = computeSlaDueAt(priority);
   db.prepare(
-    "UPDATE tickets SET priority = ?, priority_confidence = ?, priority_reason = ?, sla_due_at = ? WHERE id = ?"
-  ).run(priority, 1, reason || "agent override", slaDueAt, id);
+    "UPDATE tickets SET priority = ?, priority_confidence = ?, priority_reason = ?, sla_due_at = ? WHERE id = ? AND company_id = ?"
+  ).run(priority, 1, reason || "agent override", slaDueAt, id, req.user.company_id);
   notifyTicketPriority(id, priority, req.user);
   logAudit(
     req.user.id,
@@ -676,7 +773,7 @@ app.post("/tickets/:id/assign", requireAuth, requireAgent, requireCompanyActive,
   const id = Number(req.params.id);
   const assigneeId = Number(req.body.assignee_id || 0) || null;
 
-  db.prepare("UPDATE tickets SET assignee_id = ? WHERE id = ?").run(assigneeId, id);
+  db.prepare("UPDATE tickets SET assignee_id = ? WHERE id = ? AND company_id = ?").run(assigneeId, id, req.user.company_id);
   notifyTicketAssigned(id, assigneeId, req.user);
   logAudit(
     req.user.id,
@@ -811,6 +908,92 @@ app.get("/c/:slug", (req, res) => {
   res.send(renderCompanyLanding(company));
 });
 
+app.post("/c/:slug/join", (req, res) => {
+  const slug = (req.params.slug || "").trim().toLowerCase();
+  const name = (req.body.name || "").trim();
+  const email = (req.body.email || "").trim().toLowerCase();
+  const password = req.body.password || "";
+
+  if (!name || !email || !password) {
+    return res.status(400).send("Name, email, and password are required.");
+  }
+
+  const company = db.prepare("SELECT id, name, invite_required, allowed_domains FROM companies WHERE slug = ?").get(slug);
+  if (!company) return res.status(404).send("Company not found.");
+  
+  if (company.invite_required) {
+    return res.status(403).send("This company requires an invite to join.");
+  }
+
+  if (company.allowed_domains) {
+    const allowed = company.allowed_domains.split(",").map(i => i.trim().toLowerCase()).filter(Boolean);
+    const domain = email.split("@")[1] || "";
+    if (allowed.length && !allowed.includes(domain)) {
+      return res.status(403).send("Your email domain is not allowed to auto-join this company.");
+    }
+  }
+
+  const existing = db.prepare("SELECT user_id FROM credentials WHERE email = ?").get(email);
+  if (existing) return res.status(400).send("Email already in use.");
+
+  const passwordHash = bcrypt.hashSync(password, 10);
+  const createUser = db.prepare("INSERT INTO users (name, role, company_id) VALUES (?, 'requester', ?)");
+  const createCred = db.prepare("INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)");
+  
+  const transaction = db.transaction(() => {
+    const userId = createUser.run(name, company.id).lastInsertRowid;
+    createCred.run(userId, email, passwordHash);
+    return userId;
+  });
+
+  const userId = transaction();
+  req.session.userId = userId;
+  res.redirect("/");
+});
+
+app.post("/demo", (req, res) => {
+  const role = req.body.role === "requester" ? "requester" : "agent";
+  const randomStr = crypto.randomBytes(8).toString("hex") + Date.now().toString(36);
+  const companyName = `Demo Inc ${randomStr.slice(0, 8)}`;
+  const slug = `demo-${randomStr}`;
+  const now = new Date().toISOString();
+  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const passwordHash = bcrypt.hashSync("password123", 10);
+
+  const createCompany = db.prepare(
+    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, 0, ?, 'active', 'starter', ?, ?)"
+  );
+  const createUser = db.prepare(
+    "INSERT INTO users (name, role, company_id) VALUES (?, ?, ?)"
+  );
+  const createCred = db.prepare(
+    "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
+  );
+
+  const transaction = db.transaction(() => {
+    const companyId = createCompany.run(companyName, slug, `${slug}.test`, trialEndsAt, now).lastInsertRowid;
+
+    // Always create both users so the demo company is fully functional
+    const agentId = createUser.run("IT Support Agent", "agent", companyId).lastInsertRowid;
+    createCred.run(agentId, `agent@${slug}.test`, passwordHash);
+
+    const requesterId = createUser.run("Employee User", "requester", companyId).lastInsertRowid;
+    createCred.run(requesterId, `user@${slug}.test`, passwordHash);
+
+    // Seed sample tickets from the requester
+    const ticketInsert = db.prepare("INSERT INTO tickets (title, description, company_id, user_id, status, priority, priority_confidence, priority_reason, created_at) VALUES (?, ?, ?, ?, 'open', ?, 1, 'demo', ?)");
+    ticketInsert.run("Cannot access payroll", "I am getting a 403 error when accessing the payroll system. This is urgent.", companyId, requesterId, "high", now);
+    ticketInsert.run("Need a new monitor", "My current monitor is flickering and gives me headaches.", companyId, requesterId, "low", now);
+    ticketInsert.run("VPN not connecting", "I can't connect to the company VPN from home. Tried restarting.", companyId, requesterId, "medium", now);
+
+    return role === "agent" ? agentId : requesterId;
+  });
+
+  req.session.userId = transaction();
+  res.redirect("/");
+});
+
+
 app.post("/signup", (req, res) => {
   const companyName = (req.body.company_name || "").trim();
   const name = (req.body.name || "").trim();
@@ -839,10 +1022,9 @@ app.post("/signup", (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const passwordHash = bcrypt.hashSync(password, 10);
   const createCompany = db.prepare(
-    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)"
+    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'pending', 'pending_plan', NULL, ?)"
   );
   const createUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, 'agent', ?)"
@@ -857,17 +1039,36 @@ app.post("/signup", (req, res) => {
       slug || slugify(companyName),
       inviteRequired,
       domains,
-      plan,
-      trialEndsAt,
       now
     ).lastInsertRowid;
     const userId = createUser.run(name, companyId).lastInsertRowid;
     createCred.run(userId, email, passwordHash);
     logAudit(userId, companyId, "company.signup", "company", companyId, plan);
+    return userId;
   });
 
-  transaction();
-  res.send(renderSignup("Signup received. You have a 30-day trial. Submit payment to stay active."));
+  req.session.userId = transaction();
+  res.redirect("/select-plan");
+});
+
+app.get("/select-plan", requireAuth, (req, res) => {
+  if (req.user.role === "super_admin") return res.redirect("/");
+  const company = db.prepare("SELECT id, name, plan FROM companies WHERE id = ?").get(req.user.company_id);
+  if (company.plan !== 'pending_plan' && company.plan !== 'pending') {
+    return res.redirect("/billing");
+  }
+  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
+  res.send(renderSelectPlan(plans, company));
+});
+
+app.post("/select-plan", requireAuth, (req, res) => {
+  const planCode = req.body.plan;
+  if (!planCode) return res.status(400).send("Plan required");
+  
+  // Set the plan and grant a 30-day trial starting NOW
+  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("UPDATE companies SET plan = ?, trial_ends_at = ? WHERE id = ?").run(planCode, trialEndsAt, req.user.company_id);
+  res.redirect("/");
 });
 
 app.get("/billing", requireAuth, (req, res) => {
@@ -876,22 +1077,23 @@ app.get("/billing", requireAuth, (req, res) => {
   }
 
   const company = db
-    .prepare("SELECT id, name, status, plan FROM companies WHERE id = ?")
+    .prepare("SELECT id, name, status, plan, trial_ends_at FROM companies WHERE id = ?")
     .get(req.user.company_id);
   const payments = db
     .prepare(
       "SELECT id, method, reference, amount, status, created_at FROM payment_requests WHERE company_id = ? ORDER BY id DESC"
     )
     .all(req.user.company_id);
+  const plans = db.prepare("SELECT * FROM plans ORDER BY price_usd ASC").all();
 
-  res.send(renderBilling(company, payments, req.user));
+  res.send(renderBilling(company, payments, plans, req.user));
 });
 
 
 app.post("/billing/request", requireAuth, (req, res) => {
+  const planCode = (req.body.plan || "").trim();
   const method = (req.body.method || "manual").trim();
   const reference = (req.body.reference || "").trim();
-  const amount = (req.body.amount || "").trim();
   const company = db
     .prepare("SELECT id, status FROM companies WHERE id = ?")
     .get(req.user.company_id);
@@ -900,12 +1102,59 @@ app.post("/billing/request", requireAuth, (req, res) => {
     return res.status(400).send("Company not found.");
   }
 
+  // Get price from the selected plan
+  const plan = db.prepare("SELECT price_usd, price_php FROM plans WHERE code = ?").get(planCode);
+  const amount = plan ? `$${plan.price_usd} USD / ₱${plan.price_php} PHP` : 'custom';
+
+  // Update company plan
+  if (planCode) {
+    db.prepare("UPDATE companies SET plan = ? WHERE id = ?").run(planCode, company.id);
+  }
+
   db.prepare(
     "INSERT INTO payment_requests (company_id, owner_id, method, reference, amount, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)"
   ).run(company.id, req.user.id, method, reference, amount, new Date().toISOString());
 
-  logAudit(req.user.id, req.user.company_id, "billing.request", "company", company.id, method);
+  logAudit(req.user.id, req.user.company_id, "billing.request", "company", company.id, `${planCode} via ${method}`);
   res.redirect("/billing");
+});
+
+app.post("/webhooks/stripe", (req, res) => {
+  const { reference, status } = req.body;
+  if (!reference) return res.status(400).send("Missing reference");
+  
+  if (status === "succeeded") {
+    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'stripe'").get(reference);
+    if (request) {
+      db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
+      db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
+    }
+  }
+  res.send({ received: true });
+});
+
+app.post("/webhooks/paypal", (req, res) => {
+  const { reference, status } = req.body;
+  if (status === "COMPLETED" && reference) {
+    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'paypal'").get(reference);
+    if (request) {
+      db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
+      db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
+    }
+  }
+  res.send({ received: true });
+});
+
+app.post("/webhooks/gcash", (req, res) => {
+  const { reference, status } = req.body;
+  if (status === "paid" && reference) {
+    const request = db.prepare("SELECT id, company_id FROM payment_requests WHERE reference = ? AND method = 'gcash'").get(reference);
+    if (request) {
+      db.prepare("UPDATE payment_requests SET status = 'paid', paid_at = ? WHERE id = ?").run(new Date().toISOString(), request.id);
+      db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
+    }
+  }
+  res.send({ received: true });
 });
 
 app.get("/invite/:token", (req, res) => {
@@ -990,8 +1239,11 @@ function renderHome(
     filterParams.priority = filterPriority;
   }
   const filterQuery = new URLSearchParams(filterParams).toString();
+  
+  const currentTab = filters?.tab || 'active';
+  const displayedTickets = tickets.filter(t => currentTab === 'active' ? t.status !== 'resolved' : t.status === 'resolved');
 
-  const rows = tickets
+  const rows = displayedTickets
     .map(
       (ticket) => `
         <li class="ticket">
@@ -1010,39 +1262,36 @@ function renderHome(
               <span class="badge status ${ticket.status}">${formatStatus(ticket.status)}</span>
               <span class="badge priority ${ticket.priority}">${ticket.priority}</span>
               ${renderPriorityMeta(ticket.priority_confidence, ticket.priority_reason)}
-              ${renderSlaBadge(ticket.sla_due_at)}
               <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
             </div>
           </div>
           <div class="ticket-actions">
             ${
-              currentUser.role === "agent"
+              currentUser.role === "agent" || currentUser.role === "super_admin"
                 ? `
-                  <form action="/tickets/${ticket.id}/status" method="post">
-                    <select name="status" onchange="this.form.submit()">
-                      ${renderOption("open", ticket.status)}
-                      ${renderOption("in_progress", ticket.status, "In progress")}
-                      ${renderOption("resolved", ticket.status)}
-                    </select>
-                  </form>
-                  <form action="/tickets/${ticket.id}/priority" method="post" class="priority-form">
-                    <select name="priority" onchange="this.form.submit()">
-                      ${renderOption("low", ticket.priority)}
-                      ${renderOption("medium", ticket.priority)}
-                      ${renderOption("high", ticket.priority)}
-                    </select>
-                    <input name="reason" placeholder="Reason (optional)" />
-                    <button type="submit">Update</button>
-                  </form>
-                  <form action="/tickets/${ticket.id}/assign" method="post">
-                    <select name="assignee_id" onchange="this.form.submit()">
-                      <option value="">Unassigned</option>
-                      ${renderOptionList(agentOptions, ticket.assignee_id)}
-                    </select>
-                  </form>
-                  <form action="/tickets/${ticket.id}/delete" method="post">
-                    <button type="submit" class="danger">Delete</button>
-                  </form>
+                  <div style="display: flex; gap: 10px; align-items: center; width: 100%;">
+                    <form action="/tickets/${ticket.id}/status" method="post">
+                      ${ticket.status === 'open' ? `<input type="hidden" name="status" value="in_progress"><button type="submit" class="primary-btn glow-btn" style="padding: 8px 16px;">▶ Start Processing</button>` : ''}
+                      ${ticket.status === 'in_progress' ? `<input type="hidden" name="status" value="resolved"><button type="submit" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">✔ Resolve Issue</button>` : ''}
+                      ${ticket.status === 'resolved' ? `<input type="hidden" name="status" value="open"><button type="submit" class="ghost" style="padding: 8px 16px;">↺ Reopen</button>` : ''}
+                    </form>
+
+                    <form action="/tickets/${ticket.id}/assign" method="post">
+                      ${ticket.assignee_id === currentUser.id 
+                        ? `<input type="hidden" name="assignee_id" value=""><button type="submit" class="ghost" style="padding: 8px 16px;">Release Job</button>` 
+                        : `<input type="hidden" name="assignee_id" value="${currentUser.id}"><button type="submit" class="ghost" style="padding: 8px 16px;">✋ Claim Job</button>`
+                      }
+                    </form>
+
+                    <form action="/tickets/${ticket.id}/priority" method="post" style="display: flex; gap: 5px; margin-left: auto;">
+                      <select name="priority" style="padding: 6px 10px; font-size: 13px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel);">
+                        ${renderOption("low", ticket.priority)}
+                        ${renderOption("medium", ticket.priority)}
+                        ${renderOption("high", ticket.priority)}
+                      </select>
+                      <button type="submit" class="ghost" style="padding: 6px 12px; font-size: 13px;">Set Priority</button>
+                    </form>
+                  </div>
                 `
                 : ""
             }
@@ -1060,24 +1309,13 @@ function renderHome(
           <div class="attachment-block">
             <h4>Attachments</h4>
             <ul class="attachments">
-              ${renderAttachments(attachmentsByTicketId[ticket.id])}
+              ${renderAttachments(attachmentsByTicketId[ticket.id], ticket.id)}
             </ul>
             <form action="/tickets/${ticket.id}/attachments" method="post" enctype="multipart/form-data" class="attachment-form">
               <input type="file" name="attachment" required />
               <button type="submit">Upload</button>
             </form>
           </div>
-          ${
-            currentUser.role === "agent"
-              ? `
-                <form action="/tickets/${ticket.id}/sla" method="post" class="sla-form">
-                  <label for="sla-${ticket.id}">Adjust SLA</label>
-                  <input id="sla-${ticket.id}" type="datetime-local" name="sla_due_at" />
-                  <button type="submit">Update SLA</button>
-                </form>
-              `
-              : ""
-          }
         </li>
       `
     )
@@ -1140,7 +1378,47 @@ function renderHome(
           </section>
 
           <section class="panel">
-            <form class="filters ${currentUser.role === "agent" ? "" : "single"}" action="/search" method="get">
+            <form class="ticket-form" action="/tickets" method="post">
+              <div>
+                <label for="title">Title</label>
+                <input id="title" name="title" placeholder="Laptop won't boot" required />
+              </div>
+              ${
+                currentUser.role === "agent"
+                  ? `
+                    <div>
+                      <label for="priority">Priority</label>
+                      <select id="priority" name="priority">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                  `
+                  : ""
+              }
+              <div>
+                <label>Requester</label>
+                <div class="readonly">${escapeHtml(currentUser.name)}</div>
+              </div>
+              <div class="full">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="3" placeholder="Describe the issue and any urgency..." required></textarea>
+              </div>
+              <div class="full actions">
+                <button type="submit">Create ticket</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h2>Queue</h2>
+            <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
+              <a href="/?tab=active" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'active' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'active' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Active Tickets</a>
+              <a href="/?tab=resolved" class="ghost" style="padding: 8px 16px; background: ${currentTab === 'resolved' ? 'var(--accent)' : 'transparent'}; color: ${currentTab === 'resolved' ? 'white' : 'var(--ink)'}; border-radius: 4px; text-decoration: none; border: 1px solid var(--border);">Resolved Tickets</a>
+            </div>
+            
+            <form class="filters ${currentUser.role === "agent" ? "" : "single"}" action="/search" method="get" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border);">
               <div>
                 <label for="filter-status">Status</label>
                 <select id="filter-status" name="status">
@@ -1173,57 +1451,65 @@ function renderHome(
                 <button type="submit">Apply filters</button>
               </div>
             </form>
-            <form class="ticket-form" action="/tickets" method="post">
-              <div>
-                <label for="title">Title</label>
-                <input id="title" name="title" placeholder="Laptop won't boot" required />
-              </div>
-              ${
-                currentUser.role === "agent"
-                  ? `
-                    <div>
-                      <label for="priority">Priority</label>
-                      <select id="priority" name="priority">
-                        <option value="low">Low</option>
-                        <option value="medium" selected>Medium</option>
-                        <option value="high">High</option>
-                      </select>
-                    </div>
-                  `
-                  : ""
-              }
-              <div>
-                <label>Requester</label>
-                <div class="readonly">${escapeHtml(currentUser.name)}</div>
-              </div>
-              <div class="full">
-                <label for="description">Description</label>
-                <textarea id="description" name="description" rows="3" placeholder="Describe the issue and any urgency..." required></textarea>
-              </div>
-              ${
-                currentUser.role === "agent"
-                  ? `
-                    <div>
-                      <label for="sla">SLA due</label>
-                      <input id="sla" type="datetime-local" name="sla_due_at" />
-                    </div>
-                  `
-                  : ""
-              }
-              <div class="full actions">
-                <button type="submit">Create ticket</button>
-              </div>
-            </form>
-          </section>
 
-          <section class="panel">
-            <h2>Queue</h2>
-            <p class="filter-note">Showing ${tickets.length} ticket(s) • <a href="/search?${filterQuery}">Permalink</a> • <a href="/">Clear filters</a></p>
+            <p class="filter-note">Showing ${displayedTickets.length} ticket(s) • <a href="/search?${filterQuery}">Permalink</a> • <a href="/">Clear filters</a></p>
             <ul class="tickets">
               ${rows || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
             </ul>
           </section>
         </main>
+        <script>
+          const SCROLL_KEY = 'desk_scroll';
+          const saved = sessionStorage.getItem(SCROLL_KEY);
+          if (saved) { window.scrollTo(0, parseInt(saved)); sessionStorage.removeItem(SCROLL_KEY); }
+
+          document.querySelectorAll('form[action^="/tickets/"]').forEach(form => {
+            if (form.enctype === 'multipart/form-data') return;
+            form.addEventListener('submit', async (e) => {
+              e.preventDefault();
+              sessionStorage.setItem(SCROLL_KEY, window.scrollY);
+              const data = new URLSearchParams(new FormData(form));
+              try {
+                const r = await fetch(form.action, { method:'POST', body:data, redirect:'follow' });
+                if (r.redirected || r.ok) location.reload();
+                else alert('Action failed.');
+              } catch { location.reload(); }
+            });
+          });
+
+          document.querySelectorAll('.attachment-form').forEach(form => {
+            const inp = form.querySelector('input[type="file"]');
+            const btn = form.querySelector('button[type="submit"]');
+            btn.style.display = 'none';
+            let pv = null;
+            inp.addEventListener('change', () => {
+              if (pv) { pv.remove(); pv = null; }
+              const f = inp.files[0]; if (!f) return;
+              btn.style.display = '';
+              pv = document.createElement('div');
+              pv.style.cssText = 'margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--panel)';
+              if (f.type.startsWith('image/')) {
+                const img = document.createElement('img');
+                img.style.cssText = 'max-width:200px;max-height:150px;border-radius:6px;display:block;margin-bottom:6px';
+                img.src = URL.createObjectURL(f);
+                pv.appendChild(img);
+              }
+              const sp = document.createElement('span');
+              sp.style.cssText = 'font-size:12px;color:var(--muted)';
+              sp.textContent = f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)';
+              pv.appendChild(sp);
+              form.insertBefore(pv, btn);
+            });
+            form.addEventListener('submit', e => {
+              if (!confirm('Upload "' + inp.files[0]?.name + '"?')) e.preventDefault();
+              else sessionStorage.setItem(SCROLL_KEY, window.scrollY);
+            });
+          });
+
+          document.querySelectorAll('.tabs a').forEach(el => {
+            el.addEventListener('click', () => sessionStorage.setItem(SCROLL_KEY, window.scrollY));
+          });
+        </script>
       </body>
     </html>
   `;
@@ -1278,7 +1564,7 @@ function requireAuth(req, res, next) {
 }
 
 function requireAgent(req, res, next) {
-  if (!req.user || req.user.role !== "agent") {
+  if (!req.user || (req.user.role !== "agent" && req.user.role !== "super_admin")) {
     return res.status(403).send("Agent access required.");
   }
   next();
@@ -1292,11 +1578,16 @@ function requireSuperAdmin(req, res, next) {
 }
 
 function requireCompanyActive(req, res, next) {
+  if (req.user && req.user.role === "super_admin") return next();
   const company = db
-    .prepare("SELECT status, trial_ends_at FROM companies WHERE id = ?")
+    .prepare("SELECT status, trial_ends_at, plan FROM companies WHERE id = ?")
     .get(req.user.company_id);
   if (!company) {
     return res.status(402).send(renderBillingGate(req.user));
+  }
+
+  if (company.plan === "pending_plan") {
+    return res.redirect("/select-plan");
   }
 
   if (company.status === "active") {
@@ -1498,15 +1789,18 @@ function renderTrialBanner(currentCompany) {
   if (currentCompany.status === "active") return "";
 
   if (currentCompany.trial_ends_at) {
-    const daysLeft = Math.ceil(
-      (new Date(currentCompany.trial_ends_at).getTime() - Date.now()) /
-        (1000 * 60 * 60 * 24)
-    );
+    const endsAt = new Date(currentCompany.trial_ends_at);
+    const msLeft = endsAt.getTime() - Date.now();
+    const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+    
     if (daysLeft > 0) {
       return `
         <div class="trial-banner">
-          <strong>Free trial:</strong> ${daysLeft} day(s) left. Submit payment to keep access.
-          <a href="/billing">Go to billing</a>
+          <strong>⏳ Free trial:</strong> ${daysLeft} day(s) remaining.
+          <span style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
+            <span style="font-size: 13px; opacity: 0.8;">Expires ${endsAt.toLocaleDateString()}</span>
+            <a href="/billing" style="background: white; color: var(--accent); padding: 4px 14px; border-radius: 4px; text-decoration: none; font-weight: 600;">Upgrade Now</a>
+          </span>
         </div>
       `;
     }
@@ -1514,8 +1808,8 @@ function renderTrialBanner(currentCompany) {
 
   return `
     <div class="trial-banner overdue">
-      <strong>Trial ended:</strong> Please submit payment to continue using the service.
-      <a href="/billing">Go to billing</a>
+      <strong>🚫 Trial ended:</strong> Your access has expired. Please subscribe to continue.
+      <a href="/billing" style="background: white; color: #dc2626; padding: 4px 14px; border-radius: 4px; text-decoration: none; font-weight: 600; margin-left: auto;">Subscribe Now</a>
     </div>
   `;
 }
@@ -1542,7 +1836,7 @@ function renderLogin(error = "") {
         <main class="shell login-shell">
           <section class="panel login-panel">
             <h1>Sign in</h1>
-            <p class="subtitle">Use the demo accounts to access the service desk.</p>
+            <p class="subtitle">Access your company's service desk.</p>
             ${error ? `<p class=\"error\">${escapeHtml(error)}</p>` : ""}
             <form class="login-form" action="/login" method="post">
               <label for="email">Email</label>
@@ -1556,10 +1850,7 @@ function renderLogin(error = "") {
             </form>
             <p class="helper"><a href="/forgot">Forgot password?</a></p>
             <p class="helper"><a href="/signup">Create a company account</a></p>
-            <div class="login-hint">
-              <p>Demo password for all users: <strong>password123</strong></p>
-              <p>Example: <strong>avery.kim@acme.test</strong> (requester) or <strong>morgan.diaz@acme.test</strong> (agent)</p>
-            </div>
+            <p class="helper"><a href="/">← Back to home</a></p>
           </section>
         </main>
         <script>
@@ -1613,12 +1904,6 @@ function renderSignup(message = "") {
                 <input id="password" name="password" type="password" required />
                 <button type="button" class="icon-button" data-toggle="password">👁</button>
               </div>
-              <label for="plan">Plan</label>
-              <select id="plan" name="plan">
-                <option value="starter">Starter</option>
-                <option value="growth">Growth</option>
-                <option value="enterprise">Enterprise</option>
-              </select>
               <button type="submit">Submit signup</button>
             </form>
             <p class="helper"><a href="/login">Back to login</a></p>
@@ -1634,6 +1919,50 @@ function renderSignup(message = "") {
             });
           });
         </script>
+      </body>
+    </html>
+  `;
+}
+
+function renderSelectPlan(plans, company) {
+  const cards = plans.map(p => `
+    <div class="report-card plan-card" style="text-align: center; border: 2px solid var(--border); transition: all 0.2s; cursor: pointer;" onclick="document.getElementById('plan-${p.code}').checked = true; document.querySelectorAll('.plan-card').forEach(c => c.style.borderColor = 'var(--border)'); this.style.borderColor = 'var(--accent)';">
+      <div style="font-size: 40px; margin-bottom: 12px;">${p.icon || '📦'}</div>
+      <h3 style="font-size: 24px; margin: 0 0 8px;">${escapeHtml(p.name)}</h3>
+      <p style="font-size: 14px; color: var(--muted); margin-bottom: 16px;">
+        <strong style="font-size: 24px; color: var(--ink);">₱${p.price_php}</strong> /mo<br>
+        <span style="font-size: 13px;">(or $${p.price_usd} /mo)</span>
+      </p>
+      <input type="radio" id="plan-${p.code}" name="plan" value="${p.code}" required style="display: none;" />
+    </div>
+  `).join("");
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Select a Plan</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell login-shell">
+          <section class="panel" style="max-width: 800px; width: 100%;">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1>Choose your Plan</h1>
+              <p class="subtitle">Select the right tier for ${escapeHtml(company.name)}.</p>
+            </div>
+            <form action="/select-plan" method="post">
+              <div class="report-grid" style="margin-bottom: 32px;">
+                ${cards}
+              </div>
+              <div class="full actions" style="text-align: center;">
+                <button type="submit" class="glow-btn" style="padding: 14px 40px;">Continue to Billing</button>
+              </div>
+            </form>
+          </section>
+        </main>
       </body>
     </html>
   `;
@@ -1681,7 +2010,7 @@ function renderCompanySettings(company, currentUser) {
           <header class="topbar">
             <div>
               <h2>Company settings</h2>
-              <p>${escapeHtml(company.name)} • Plan: ${escapeHtml(company.plan)}</p>
+              <p>${escapeHtml(company.name)} • Plan: ${escapeHtml((company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1))}</p>
             </div>
             <div class="top-actions">
               <a class="ghost" href="/admin/users">Back to users</a>
@@ -1690,6 +2019,16 @@ function renderCompanySettings(company, currentUser) {
               </form>
             </div>
           </header>
+
+          <section class="panel">
+            <h3>📎 Share Your Ticketing Portal</h3>
+            <p class="subtitle">Share this unique URL with your employees so they can create accounts and submit tickets.</p>
+            <div style="display: flex; gap: 10px; align-items: center; background: var(--bg); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); margin: 12px 0;">
+              <code id="share-url" style="flex: 1; font-size: 14px; word-break: break-all;"></code>
+              <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('share-url').textContent).then(()=>this.textContent='Copied!').catch(()=>{})" class="ghost" style="padding: 6px 14px; white-space: nowrap;">📋 Copy</button>
+            </div>
+            <p style="font-size: 13px; color: var(--muted);">Only users with approved email domains can join. Configure allowed domains below.</p>
+          </section>
 
           <section class="panel">
             <form class="ticket-form" action="/admin/company" method="post">
@@ -1727,25 +2066,58 @@ function renderCompanySettings(company, currentUser) {
             </form>
           </section>
         </main>
+        <script>
+          const el = document.getElementById('share-url');
+          if (el) el.textContent = window.location.origin + '/c/${escapeHtml(company.slug || "")}';
+        </script>
       </body>
     </html>
   `;
 }
 
-function renderBilling(company, payments, currentUser) {
-  const rows = payments
+function renderBilling(company, payments, plans, currentUser) {
+  const paymentRows = payments
     .map(
       (payment) => `
         <tr>
           <td>${escapeHtml(payment.method)}</td>
           <td>${escapeHtml(payment.reference || "")}</td>
           <td>${escapeHtml(payment.amount || "")}</td>
-          <td>${escapeHtml(payment.status)}</td>
+          <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:white;background:${payment.status === 'paid' ? '#10b981' : payment.status === 'pending' ? '#f59e0b' : '#ef4444'}">${escapeHtml(payment.status)}</span></td>
           <td>${new Date(payment.created_at).toLocaleString()}</td>
         </tr>
       `
     )
     .join("");
+
+  const features = {
+    starter: ["Up to 5 agents", "100 tickets/month", "Email notifications", "Basic reports"],
+    growth: ["Up to 20 agents", "Unlimited tickets", "Priority support", "Advanced analytics", "Custom branding"],
+    enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "SSO integration", "Custom SLA rules", "Audit logs"]
+  };
+
+  const planCards = plans.map(p => {
+    const isCurrent = company.plan === p.code;
+    const featureList = (features[p.code] || ["Full access"]).map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
+    return `
+      <div style="flex:1;min-width:220px;border:2px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'};border-radius:12px;padding:24px;background:${isCurrent ? 'rgba(99,102,241,0.04)' : 'var(--panel)'};position:relative;">
+        ${isCurrent ? '<span style="position:absolute;top:-10px;right:16px;background:var(--accent);color:white;font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600;">Current Plan</span>' : ''}
+        <h3 style="margin:0 0 4px;">${escapeHtml(p.name)}</h3>
+        <div style="margin:12px 0;">
+          <span style="font-size:28px;font-weight:700;">$${p.price_usd}</span><span style="color:var(--muted);font-size:14px;">/mo USD</span>
+        </div>
+        <div style="margin-bottom:12px;font-size:14px;color:var(--muted);">₱${p.price_php}/mo PHP</div>
+        <ul style="list-style:none;padding:0;margin:0 0 16px;">${featureList}</ul>
+        ${!isCurrent ? `<button type="button" class="primary-btn" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')" style="width:100%;padding:10px;">Choose ${escapeHtml(p.name)}</button>` : '<button disabled style="width:100%;padding:10px;opacity:0.5;cursor:default;border:1px solid var(--border);border-radius:6px;background:var(--bg);">Active Plan</button>'}
+      </div>
+    `;
+  }).join("");
+
+  const trialInfo = company.trial_ends_at
+    ? `<p style="font-size:14px;color:var(--muted);">Trial expires: ${new Date(company.trial_ends_at).toLocaleDateString()}</p>`
+    : '';
+
+  const planName = (company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1);
 
   return `
     <!doctype html>
@@ -1753,15 +2125,16 @@ function renderBilling(company, payments, currentUser) {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Billing</title>
+        <title>Billing & Plans</title>
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
         <main class="shell">
           <header class="topbar">
             <div>
-              <h2>Billing</h2>
-              <p>${escapeHtml(company.name)} • Status: ${escapeHtml(company.status)}</p>
+              <h2>Billing & Plans</h2>
+              <p>${escapeHtml(company.name)} • Status: <strong style="text-transform:capitalize;">${escapeHtml(company.status)}</strong> • Plan: <strong>${escapeHtml(planName)}</strong></p>
+              ${trialInfo}
             </div>
             <div class="top-actions">
               <a class="ghost" href="/">Back to desk</a>
@@ -1772,38 +2145,43 @@ function renderBilling(company, payments, currentUser) {
           </header>
 
           <section class="panel">
-            <h3>Submit payment</h3>
-            <p class="subtitle">Choose a method. We will activate your company after verification.</p>
-            <div class="notice">
-              <p><strong>Stripe / PayPal / GCash setup pending.</strong> You can submit your transaction reference now.</p>
-              <p>Once we add live keys, payments can be auto-verified.</p>
+            <h3>Choose Your Plan</h3>
+            <p class="subtitle">Select a plan that fits your team. Payment activates your account permanently.</p>
+            <div style="display:flex;gap:20px;flex-wrap:wrap;margin:20px 0;">
+              ${planCards}
             </div>
+          </section>
+
+          <section class="panel" id="payment-section" style="display:none;">
+            <h3 id="payment-title">Complete Payment</h3>
+            <p class="subtitle">Submit your payment details for the selected plan. We'll activate your account after verification.</p>
             <form class="ticket-form" action="/billing/request" method="post">
+              <input type="hidden" id="selected-plan" name="plan" value="" />
+              <div>
+                <label>Selected plan</label>
+                <div class="readonly" id="plan-display">—</div>
+              </div>
               <div>
                 <label for="method">Payment method</label>
                 <select id="method" name="method">
-                  <option value="stripe">Stripe (card)</option>
+                  <option value="stripe">Stripe (Card)</option>
                   <option value="paypal">PayPal</option>
                   <option value="gcash">GCash</option>
-                  <option value="bank">Bank transfer</option>
+                  <option value="bank">Bank Transfer</option>
                 </select>
               </div>
               <div>
-                <label for="amount">Amount</label>
-                <input id="amount" name="amount" placeholder="e.g. 2999 PHP" />
-              </div>
-              <div>
-                <label for="reference">Reference / Transaction ID</label>
-                <input id="reference" name="reference" placeholder="Paste payment reference" />
+                <label for="reference">Transaction Reference / ID</label>
+                <input id="reference" name="reference" placeholder="Paste your payment reference here" required />
               </div>
               <div class="full actions">
-                <button type="submit">Submit payment</button>
+                <button type="submit">Submit Payment</button>
               </div>
             </form>
           </section>
 
           <section class="panel">
-            <h3>Payment history</h3>
+            <h3>Payment History</h3>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -1816,18 +2194,45 @@ function renderBilling(company, payments, currentUser) {
                   </tr>
                 </thead>
                 <tbody>
-                  ${rows || "<tr><td colspan=\"5\">No payments yet.</td></tr>"}
+                  ${paymentRows || "<tr><td colspan=\"5\">No payments yet.</td></tr>"}
                 </tbody>
               </table>
             </div>
           </section>
         </main>
+        <script>
+          function selectPlan(code, name, usd, php) {
+            document.getElementById('selected-plan').value = code;
+            document.getElementById('plan-display').textContent = name + ' — ' + usd + '/mo (' + php + '/mo)';
+            document.getElementById('payment-section').style.display = '';
+            document.getElementById('payment-section').scrollIntoView({ behavior: 'smooth' });
+          }
+        </script>
       </body>
     </html>
   `;
 }
 
 function renderCompanyLanding(company) {
+  const joinForm = company.invite_required ? 
+    `<p class="notice">Invite-only access is enabled. Contact your administrator.</p>` :
+    `
+    <div class="join-box panel">
+      <h3>Join ${escapeHtml(company.name)}</h3>
+      <p class="subtitle">Sign up with your approved company email.</p>
+      <form action="/c/${escapeHtml(company.slug)}/join" method="post" class="login-form">
+        <label>Name</label><input name="name" required />
+        <label>Email</label><input type="email" name="email" placeholder="e.g. you@${escapeHtml(company.allowed_domains || 'company.com')}" required />
+        <label>Password</label>
+        <div class="password-field">
+          <input name="password" type="password" required />
+          <button type="button" class="icon-button" data-toggle="password">👁</button>
+        </div>
+        <button type="submit" style="margin-top: 10px;">Join Company</button>
+      </form>
+    </div>
+    `;
+
   return `
     <!doctype html>
     <html lang="en">
@@ -1838,47 +2243,39 @@ function renderCompanyLanding(company) {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
-        <main class="shell login-shell">
+        <main class="shell login-shell" style="--brand:${company.brand_color ? escapeHtml(company.brand_color) : '#d26a2b'}">
           <section class="panel landing">
             <div class="landing-header">
               <div>
-                <p class="eyebrow">${escapeHtml(company.plan)} plan</p>
+                <p class="eyebrow">${escapeHtml((company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1))} plan</p>
                 <h1>${escapeHtml(company.name)} Service Desk</h1>
                 <p class="subtitle">Fast, structured IT support with clear priorities, SLAs, and real-time updates.</p>
               </div>
               ${
                 company.logo_url
-                  ? `<img class=\"brand-logo\" src=\"${escapeHtml(
+                  ? `<img class="brand-logo" src="${escapeHtml(
                       company.logo_url
-                    )}\" alt=\"${escapeHtml(company.name)} logo\" />`
+                    )}" alt="${escapeHtml(company.name)} logo" />`
                   : ""
               }
             </div>
             <div class="landing-actions">
-              <a class="ghost primary" href="/login">Sign in</a>
-              <a class="ghost" href="/signup">Create company</a>
+              <a class="ghost primary" href="/login">Sign in to Existing Account</a>
+              <a class="ghost" href="/">Main Page</a>
             </div>
-            <div class="landing-grid">
-              <div>
-                <h3>AI‑guided priority</h3>
-                <p>Requests are assessed automatically with a confidence tag, then agents can override with reason.</p>
-              </div>
-              <div>
-                <h3>Secure access</h3>
-                <p>Invite‑only or domain‑restricted access keeps your queue private and auditable.</p>
-              </div>
-              <div>
-                <h3>Billing control</h3>
-                <p>Start a 30‑day trial and unlock production features after payment verification.</p>
-              </div>
-            </div>
-            ${
-              company.invite_required
-                ? `<p class=\"notice\">Invite-only access is enabled.</p>`
-                : `<p class=\"notice\">Ask your admin for an invite or sign up with an approved email domain.</p>`
-            }
+            ${joinForm}
           </section>
         </main>
+        <script>
+          document.querySelectorAll("[data-toggle='password']").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const input = btn.parentElement.querySelector("input");
+              const isPassword = input.type === "password";
+              input.type = isPassword ? "text" : "password";
+              btn.textContent = isPassword ? "🙈" : "👁";
+            });
+          });
+        </script>
       </body>
     </html>
   `;
@@ -2225,6 +2622,61 @@ function renderUserAdmin(users, invites, currentUser) {
   `;
 }
 
+function renderAdminPlans(plans, currentUser) {
+  const rows = plans.map(p => `
+    <tr>
+      <td><strong>${escapeHtml(p.name)}</strong></td>
+      <td>
+        <form action="/admin/plans/${p.id}" method="post" style="display: flex; gap: 10px; align-items: center;">
+          $<input type="number" name="price_usd" value="${p.price_usd}" style="width: 80px;" required />
+          ₱<input type="number" name="price_php" value="${p.price_php}" style="width: 100px;" required />
+          <button type="submit" style="padding: 6px 12px; font-size: 12px;">Save</button>
+        </form>
+      </td>
+    </tr>
+  `).join("");
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Manage Plans</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell">
+          <header class="topbar">
+            <div>
+              <h2>Manage Pricing Plans</h2>
+              <p>Platform Admin Settings</p>
+            </div>
+            <div class="top-actions">
+              <a class="ghost" href="/">Back to desk</a>
+            </div>
+          </header>
+          <section class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plan Name</th>
+                    <th>Pricing (USD / PHP)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
 function renderInviteRows(invites) {
   if (!invites.length) {
     return "<tr><td colspan=\"4\">No invites yet.</td></tr>";
@@ -2374,27 +2826,261 @@ function renderComments(comments = []) {
     .join("");
 }
 
-function renderAttachments(attachments = []) {
+function renderAttachments(attachments = [], ticketId = 0) {
   if (!attachments.length) {
     return "<li class=\"empty\">No files uploaded.</li>";
   }
 
+  const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+
   return attachments
-    .map(
-      (attachment) => `
-        <li>
-          <a href="/uploads/${encodeURIComponent(attachment.stored_name)}" target="_blank" rel="noreferrer">${escapeHtml(
-            attachment.original_name
-          )}</a>
+    .map((attachment) => {
+      const ext = (attachment.original_name || "").toLowerCase().replace(/.*(\.\w+)$/, "$1");
+      const isImage = imageExts.includes(ext);
+      const url = `/uploads/${encodeURIComponent(attachment.stored_name)}`;
+      const deleteBtn = `<form action="/tickets/${ticketId}/attachments/${attachment.id}/delete" method="post" style="display:inline;" onsubmit="return confirm('Delete this file?')"><button type="submit" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;padding:2px 6px;">✕ Remove</button></form>`;
+
+      if (isImage) {
+        return `
+          <li style="margin-bottom: 10px;">
+            <div style="border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-width: 400px; position: relative;">
+              <img src="${url}" alt="${escapeHtml(attachment.original_name)}" style="width: 100%; display: block; cursor: pointer;" onclick="this.requestFullscreen ? this.requestFullscreen() : null" />
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+              <span style="font-size: 12px; color: var(--muted);">${escapeHtml(attachment.original_name)} · ${formatBytes(attachment.size_bytes)}</span>
+              ${deleteBtn}
+            </div>
+          </li>
+        `;
+      }
+
+      return `
+        <li style="display: flex; align-items: center; gap: 8px;">
+          <a href="${url}" target="_blank" rel="noreferrer">📄 ${escapeHtml(attachment.original_name)}</a>
           <span>${formatBytes(attachment.size_bytes)}</span>
+          ${deleteBtn}
         </li>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
 function renderOption(value, current, label = value) {
   return `<option value="${value}" ${value === current ? "selected" : ""}>${label}</option>`;
+}
+
+function renderSuperAdminDashboard(data, currentUser) {
+  const { companies, totalTickets, totalUsers, activeCompanies, trialCompanies, auditLogs } = data;
+
+  const companyRows = companies.map(c => {
+    const statusColor = c.status === 'active' ? '#10b981' : c.status === 'pending' ? '#f59e0b' : '#ef4444';
+    const trialLabel = c.trial_ends_at ? new Date(c.trial_ends_at).toLocaleDateString() : '—';
+    return `
+      <tr>
+        <td><strong>${escapeHtml(c.name)}</strong><br><span style="font-size:12px; color: var(--muted);">${escapeHtml(c.slug)}</span></td>
+        <td><span style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; background:${statusColor};">${escapeHtml(c.status)}</span></td>
+        <td>${escapeHtml((c.plan === 'pending_plan' || !c.plan) ? 'Not Selected' : c.plan.charAt(0).toUpperCase() + c.plan.slice(1))}</td>
+        <td>${c.user_count}</td>
+        <td>${c.ticket_count}</td>
+        <td>${trialLabel}</td>
+        <td>${new Date(c.created_at).toLocaleDateString()}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const logRows = auditLogs.map(l => `
+    <tr>
+      <td style="font-size:13px;">${escapeHtml(l.actor_name || 'System')}</td>
+      <td style="font-size:13px;"><code>${escapeHtml(l.action)}</code></td>
+      <td style="font-size:12px; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(l.details || '')}</td>
+      <td style="font-size:12px; color:var(--muted);">${new Date(l.created_at).toLocaleString()}</td>
+    </tr>
+  `).join("");
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Platform Admin · Service Desk</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell">
+          <header class="topbar">
+            <div>
+              <h2>⚙️ Platform Admin</h2>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (super_admin)</p>
+            </div>
+            <div class="top-actions">
+              <a class="ghost" href="/admin/plans">Manage Plans</a>
+              <form action="/logout" method="post">
+                <button type="submit" class="ghost">Log out</button>
+              </form>
+            </div>
+          </header>
+
+          <section class="hero">
+            <div>
+              <p class="eyebrow">Real-time Overview</p>
+              <h1>Platform Dashboard</h1>
+              <p class="subtitle">Monitor all companies, subscriptions, and system activity.</p>
+            </div>
+            <div class="stats">
+              <div>
+                <span class="stat">${companies.length}</span>
+                <span class="label">Companies</span>
+              </div>
+              <div>
+                <span class="stat">${activeCompanies}</span>
+                <span class="label">Active</span>
+              </div>
+              <div>
+                <span class="stat">${trialCompanies}</span>
+                <span class="label">On Trial</span>
+              </div>
+              <div>
+                <span class="stat">${totalUsers}</span>
+                <span class="label">Total Users</span>
+              </div>
+              <div>
+                <span class="stat">${totalTickets}</span>
+                <span class="label">Total Tickets</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>All Companies</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Status</th>
+                    <th>Plan</th>
+                    <th>Users</th>
+                    <th>Tickets</th>
+                    <th>Trial Ends</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${companyRows || "<tr><td colspan='7'>No companies yet.</td></tr>"}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Recent Audit Log</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${logRows || "<tr><td colspan='4'>No activity yet.</td></tr>"}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
+function renderPublicLanding() {
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Service Desk - Modern Ticketing</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="public-landing">
+          <nav class="public-nav">
+            <div class="logo">Service Desk</div>
+            <div class="nav-links">
+              <a class="ghost" href="/login">Sign in</a>
+              <a class="ghost" href="/signup">Pricing</a>
+            </div>
+          </nav>
+          <header class="public-hero">
+            <div class="hero-content">
+              <h1>The IT Desk that runs itself.</h1>
+              <p>Fast, AI-prioritized, and beautifully simple. Stop wrangling emails and start resolving issues. Enjoy a powerful, dedicated instance for your company.</p>
+              <div class="cta-group">
+                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                  <form action="/demo" method="post">
+                    <input type="hidden" name="role" value="agent" />
+                    <button type="submit" class="primary-btn glow-btn">🛠️ Try as IT Agent</button>
+                  </form>
+                  <form action="/demo" method="post">
+                    <input type="hidden" name="role" value="requester" />
+                    <button type="submit" class="primary-btn" style="background: linear-gradient(135deg, #10b981, #059669);">📝 Try as Requestor</button>
+                  </form>
+                </div>
+                <p class="demo-note">No sign-up needed. A unique 30-day demo environment is created instantly for you.</p>
+              </div>
+            </div>
+            <div class="hero-image-wrapper">
+              <div class="glass-mockup">
+                <div class="mockup-header">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </div>
+                <div class="mockup-body">
+                  <div class="mockup-ticket">
+                    <div class="mockup-title">Cannot access payroll</div>
+                    <div class="mockup-badge priority high">High Priority</div>
+                  </div>
+                  <div class="mockup-ticket">
+                    <div class="mockup-title">Need a new monitor</div>
+                    <div class="mockup-badge priority low">Low Priority</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+          
+          <section class="features-grid">
+            <div class="feature-card glass">
+              <div class="icon">🤖</div>
+              <h3>AI Triage</h3>
+              <p>Tickets are automatically prioritized based on language and urgency so agents know what to tackle first.</p>
+            </div>
+            <div class="feature-card glass">
+              <div class="icon">🔒</div>
+              <h3>Domain Security</h3>
+              <p>Enforce signups by verified company email domains. Automate onboarding while keeping out the noise.</p>
+            </div>
+            <div class="feature-card glass">
+              <div class="icon">⚡</div>
+              <h3>SLA Tracking</h3>
+              <p>Never miss a deadline with automated SLA due dates, dynamic priorities, and real-time dashboard alerts.</p>
+            </div>
+            <div class="feature-card glass">
+              <div class="icon">💳</div>
+              <h3>Global Payments</h3>
+              <p>Ready to go live? Upgrade securely via Stripe, PayPal, or GCash with instant automated webhooks.</p>
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+  `;
 }
 
 function formatStatus(value) {

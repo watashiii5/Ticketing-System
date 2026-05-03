@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ticketing-app
+    env: node
+    buildCommand: npm install
+    startCommand: node src/server.js
+    disk:
+      name: sqlite-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: SESSION_SECRET
+        generateValue: true
