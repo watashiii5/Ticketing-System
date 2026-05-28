@@ -1,6 +1,8 @@
 # Ticketing System
 Modern service desk for internal IT teams, built with Node.js + Express and deployed on Render.
-ticketing-system-8yho.onrender.com/
+
+https://ticketing-system-8yho.onrender.com/
+
 ## Highlights
 - Branded company portals with invite-only or domain-restricted access
 - AI-style priority hints, SLA due dates, and real-time status updates
