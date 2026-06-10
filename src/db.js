@@ -11,16 +11,14 @@ let pool;
 
 if (isRemote) {
   const url = new URL(connectionString);
-  const hostname = url.hostname;
-  try {
-    const addresses = dns.resolve4Sync(hostname);
-    if (addresses.length > 0) {
-      url.hostname = addresses[0];
-    }
-  } catch {}
   pool = new Pool({
-    connectionString: url.toString(),
+    host: url.hostname,
+    port: Number(url.port) || 5432,
+    database: url.pathname.slice(1),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
     ssl: { rejectUnauthorized: false },
+    family: 4,
   });
 } else {
   pool = new Pool({ connectionString });
