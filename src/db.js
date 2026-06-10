@@ -1,16 +1,30 @@
 require('dotenv').config();
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
+const dns = require("dns");
 const { AsyncLocalStorage } = require("async_hooks");
 const transactionCtx = new AsyncLocalStorage();
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost")
-    ? { rejectUnauthorized: false }
-    : false,
-  family: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost") ? 4 : undefined,
-});
+const connectionString = process.env.DATABASE_URL;
+const isRemote = connectionString && !connectionString.includes("localhost");
+let pool;
+
+if (isRemote) {
+  const url = new URL(connectionString);
+  const hostname = url.hostname;
+  try {
+    const addresses = dns.resolve4Sync(hostname);
+    if (addresses.length > 0) {
+      url.hostname = addresses[0];
+    }
+  } catch {}
+  pool = new Pool({
+    connectionString: url.toString(),
+    ssl: { rejectUnauthorized: false },
+  });
+} else {
+  pool = new Pool({ connectionString });
+}
 
 // ── Compatibility wrapper ────────────────────────────────────────
 // Mimics the better-sqlite3 synchronous API so the rest of the
