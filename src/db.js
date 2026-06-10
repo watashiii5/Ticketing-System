@@ -9,6 +9,7 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost")
     ? { rejectUnauthorized: false }
     : false,
+  family: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost") ? 4 : undefined,
 });
 
 // ── Compatibility wrapper ────────────────────────────────────────
