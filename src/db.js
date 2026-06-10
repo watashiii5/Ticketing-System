@@ -1,131 +1,58 @@
 require('dotenv').config();
-const { Pool } = require("pg");
+const Database = require("better-sqlite3");
+const path = require("path");
 const bcrypt = require("bcryptjs");
-const dns = require("dns");
-const { AsyncLocalStorage } = require("async_hooks");
-const transactionCtx = new AsyncLocalStorage();
 
-const connectionString = process.env.DATABASE_URL;
-const isRemote = connectionString && !connectionString.includes("localhost");
-let pool;
+const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "data", "ticketing.db");
 
-if (isRemote) {
-  const url = new URL(connectionString);
-  pool = new Pool({
-    host: url.hostname,
-    port: Number(url.port) || 5432,
-    database: url.pathname.slice(1),
-    user: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
-    ssl: { rejectUnauthorized: false },
-    family: 4,
-  });
-} else {
-  pool = new Pool({ connectionString });
-}
-
-// ── Compatibility wrapper ────────────────────────────────────────
-// Mimics the better-sqlite3 synchronous API so the rest of the
-// codebase keeps working with minimal changes.  All methods are
-// now async but the call-sites will `await` them.
-// ─────────────────────────────────────────────────────────────────
-
-function convertPlaceholders(sql) {
-  let idx = 0;
-  let newSql = sql.replace(/\?/g, () => `$${++idx}`);
-  
-  if (/^\s*INSERT/i.test(newSql) && !/\bRETURNING\b/i.test(newSql)) {
-    newSql += " RETURNING id";
-  }
-  
-  return newSql;
-}
+const sqlite = new Database(dbPath);
+sqlite.pragma("journal_mode = WAL");
+sqlite.pragma("foreign_keys = ON");
 
 const db = {
   prepare(sql) {
-    const pgSql = convertPlaceholders(sql);
+    const stmt = sqlite.prepare(sql);
     return {
-      async run(...params) {
-        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
-        return { lastInsertRowid: result.rows[0]?.id, changes: result.rowCount };
+      run(...params) {
+        const result = stmt.run(...params);
+        return { lastInsertRowid: result.lastInsertRowid, changes: result.changes };
       },
-      async get(...params) {
-        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
-        return result.rows[0] || null;
+      get(...params) {
+        return stmt.get(...params) || null;
       },
-      async all(...params) {
-        const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
-        return result.rows;
+      all(...params) {
+        return stmt.all(...params);
       },
     };
   },
 
-  async exec(sql) {
-    await (transactionCtx.getStore() || pool).query(sql);
+  exec(sql) {
+    sqlite.exec(sql);
   },
 
-  async query(sql, params = []) {
-    const result = await (transactionCtx.getStore() || pool).query(sql, params);
-    return result;
+  query(sql, params = []) {
+    return sqlite.prepare(sql).all(...params);
   },
 
-  // Transaction helper
   transaction(fn) {
     return async function (...args) {
-      const client = await pool.connect();
       try {
-        await client.query("BEGIN");
-        // Run the function inside the AsyncLocalStorage context
-        const result = await transactionCtx.run(client, async () => {
-          return await fn(...args);
-        });
-        await client.query("COMMIT");
+        sqlite.exec("BEGIN");
+        const result = await fn(...args);
+        sqlite.exec("COMMIT");
         return result;
       } catch (e) {
-        await client.query("ROLLBACK");
+        sqlite.exec("ROLLBACK");
         throw e;
-      } finally {
-        client.release();
       }
     };
   },
 };
 
-// ── INSERT ... RETURNING id wrapper ──────────────────────────────
-// SQLite returns lastInsertRowid; Postgres needs RETURNING id.
-// We override `run` for INSERT statements to append RETURNING id.
-const originalPrepare = db.prepare.bind(db);
-db.prepare = function (sql) {
-  const isInsert = sql.trim().toUpperCase().startsWith("INSERT");
-  const pgSql = convertPlaceholders(sql);
-  const pgSqlReturning = isInsert && !pgSql.toUpperCase().includes("RETURNING")
-    ? pgSql + " RETURNING id"
-    : pgSql;
-
-  return {
-    async run(...params) {
-      const result = await (transactionCtx.getStore() || pool).query(isInsert ? pgSqlReturning : pgSql, params);
-      return {
-        lastInsertRowid: result.rows[0]?.id ?? null,
-        changes: result.rowCount,
-      };
-    },
-    async get(...params) {
-      const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
-      return result.rows[0] || null;
-    },
-    async all(...params) {
-      const result = await (transactionCtx.getStore() || pool).query(pgSql, params);
-      return result.rows;
-    },
-  };
-};
-
-// ── Schema creation ──────────────────────────────────────────────
 async function initializeDatabase() {
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS companies (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       slug TEXT,
       brand_color TEXT,
@@ -136,12 +63,12 @@ async function initializeDatabase() {
       plan TEXT NOT NULL DEFAULT 'starter',
       trial_ends_at TEXT,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS tickets (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       company_id INTEGER NOT NULL DEFAULT 1,
@@ -153,40 +80,40 @@ async function initializeDatabase() {
       priority_reason TEXT,
       sla_due_at TEXT,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       role TEXT NOT NULL,
       company_id INTEGER
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS credentials (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL UNIQUE,
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS comments (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       ticket_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
       body TEXT NOT NULL,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS attachments (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       ticket_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
       original_name TEXT NOT NULL,
@@ -194,12 +121,12 @@ async function initializeDatabase() {
       mime_type TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS audit_logs (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       actor_id INTEGER,
       company_id INTEGER,
       action TEXT NOT NULL,
@@ -207,12 +134,12 @@ async function initializeDatabase() {
       entity_id INTEGER,
       details TEXT NOT NULL,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS payment_requests (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id INTEGER NOT NULL,
       owner_id INTEGER NOT NULL,
       method TEXT NOT NULL,
@@ -221,105 +148,101 @@ async function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'pending',
       paid_at TEXT,
       created_at TEXT NOT NULL
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS invites (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id INTEGER NOT NULL,
       email TEXT,
       role TEXT NOT NULL DEFAULT 'requester',
       token_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used_at TEXT
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS reset_tokens (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       token_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used_at TEXT
-    );
+    )
   `);
 
-  await (transactionCtx.getStore() || pool).query(`
+  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS plans (
-      id SERIAL PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       price_usd INTEGER NOT NULL,
       price_php INTEGER NOT NULL,
       icon TEXT
-    );
+    )
   `);
 
   // ── Seed data ────────────────────────────────────────────────
-  const companyCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM companies")).rows[0].count;
-  if (parseInt(companyCount) === 0) {
-    await (transactionCtx.getStore() || pool).query(
-      "INSERT INTO companies (name, status, plan, created_at) VALUES ($1, $2, $3, $4)",
-      ["Acme", "active", "starter", new Date().toISOString()]
-    );
+  const companyCount = sqlite.prepare("SELECT COUNT(*) as count FROM companies").get().count;
+  if (companyCount === 0) {
+    sqlite.prepare(
+      "INSERT INTO companies (name, status, plan, created_at) VALUES (?, ?, ?, ?)"
+    ).run("Acme", "active", "starter", new Date().toISOString());
   }
 
-  await (transactionCtx.getStore() || pool).query(
+  sqlite.prepare(
     "UPDATE companies SET slug = LOWER(REPLACE(name, ' ', '-')) WHERE slug IS NULL"
-  );
+  ).run();
 
-  const userCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM users")).rows[0].count;
-  if (parseInt(userCount) === 0) {
-    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Avery Kim", "requester"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Jordan Lee", "requester"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Riley Patel", "requester"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Morgan Diaz", "agent"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Casey Ortiz", "agent"]);
+  const userCount = sqlite.prepare("SELECT COUNT(*) as count FROM users").get().count;
+  if (userCount === 0) {
+    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Avery Kim", "requester");
+    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Jordan Lee", "requester");
+    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Riley Patel", "requester");
+    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Morgan Diaz", "agent");
+    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Casey Ortiz", "agent");
   }
 
-  const firstCompany = (await (transactionCtx.getStore() || pool).query("SELECT id FROM companies ORDER BY id LIMIT 1")).rows[0];
+  const firstCompany = sqlite.prepare("SELECT id FROM companies ORDER BY id LIMIT 1").get();
   if (firstCompany) {
-    await (transactionCtx.getStore() || pool).query("UPDATE users SET company_id = $1 WHERE company_id IS NULL AND role != 'super_admin'", [firstCompany.id]);
-    await (transactionCtx.getStore() || pool).query("UPDATE tickets SET company_id = $1 WHERE company_id IS NULL", [firstCompany.id]);
+    sqlite.prepare("UPDATE users SET company_id = ? WHERE company_id IS NULL AND role != 'super_admin'").run(firstCompany.id);
+    sqlite.prepare("UPDATE tickets SET company_id = ? WHERE company_id IS NULL").run(firstCompany.id);
   }
 
-  const credentialCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM credentials")).rows[0].count;
-  if (parseInt(credentialCount) === 0) {
-    const users = (await (transactionCtx.getStore() || pool).query("SELECT id, name, role FROM users")).rows;
+  const credentialCount = sqlite.prepare("SELECT COUNT(*) as count FROM credentials").get().count;
+  if (credentialCount === 0) {
+    const users = sqlite.prepare("SELECT id, name, role FROM users").all();
     const passwordHash = "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq";
     for (const user of users) {
       const email = `${user.name.toLowerCase().replace(/\s+/g, ".")}@acme.test`;
-      await (transactionCtx.getStore() || pool).query(
-        "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
-        [user.id, email, passwordHash]
-      );
+      sqlite.prepare(
+        "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
+      ).run(user.id, email, passwordHash);
     }
   }
 
-  const superAdmin = (await (transactionCtx.getStore() || pool).query("SELECT id FROM users WHERE role = 'super_admin'")).rows[0];
+  const superAdmin = sqlite.prepare("SELECT id FROM users WHERE role = 'super_admin'").get();
   if (!superAdmin) {
-    await (transactionCtx.getStore() || pool).query("DELETE FROM credentials WHERE email = 'admin@platform.test'");
-    const result = await (transactionCtx.getStore() || pool).query(
-      "INSERT INTO users (name, role, company_id) VALUES ($1, $2, NULL) RETURNING id",
-      ["Platform Admin", "super_admin"]
-    );
-    const superId = result.rows[0].id;
-    await (transactionCtx.getStore() || pool).query(
-      "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
-      [superId, "admin@platform.test", "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq"]
-    );
+    sqlite.prepare("DELETE FROM credentials WHERE email = ?").run("admin@platform.test");
+    const result = sqlite.prepare(
+      "INSERT INTO users (name, role, company_id) VALUES (?, ?, NULL)"
+    ).run("Platform Admin", "super_admin");
+    const superId = result.lastInsertRowid;
+    sqlite.prepare(
+      "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
+    ).run(superId, "admin@platform.test", "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq");
   }
 
-  const planCount = (await (transactionCtx.getStore() || pool).query("SELECT COUNT(*) as count FROM plans")).rows[0].count;
-  if (parseInt(planCount) === 0) {
-    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["starter", "Starter", 29, 1499, "🌱"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["growth", "Growth", 99, 4999, "🚀"]);
-    await (transactionCtx.getStore() || pool).query("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)", ["enterprise", "Enterprise", 299, 14999, "🏢"]);
+  const planCount = sqlite.prepare("SELECT COUNT(*) as count FROM plans").get().count;
+  if (planCount === 0) {
+    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("starter", "Starter", 29, 1499, "🌱");
+    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("growth", "Growth", 99, 4999, "🚀");
+    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("enterprise", "Enterprise", 299, 14999, "🏢");
   }
 
   console.log("Database initialized successfully.");
 }
 
-module.exports = { db, pool, initializeDatabase };
+module.exports = { db, pool: sqlite, initializeDatabase };

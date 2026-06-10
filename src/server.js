@@ -427,7 +427,7 @@ app.get("/", async (req, res, next) => {
     const totalTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets").get())).cnt;
     const resolvedTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get())).cnt;
     const totalUsers = ((await db.prepare("SELECT COUNT(*) as cnt FROM users").get())).cnt;
-    const freeTrialUsers = ((await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > NOW()::text").get())).cnt;
+    const freeTrialUsers = ((await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > ?").get(new Date().toISOString()))).cnt;
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
     
@@ -816,14 +816,16 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, async (req,
   
   if (limits.advancedAnalytics) {
     const avgResolutionTime = await db.prepare(`
-      SELECT AVG(EXTRACT(EPOCH FROM (CASE WHEN status = 'resolved' THEN created_at::timestamp ELSE NOW() END) - created_at::timestamp) / 3600) * 24 as avg_hours
+      SELECT AVG(
+        (CASE WHEN status = 'resolved' THEN strftime('%s', created_at) ELSE strftime('%s', 'now') END - strftime('%s', created_at))
+      ) / 3600.0 as avg_hours
       FROM tickets ${compFilter}
     `).get(...params);
     
     const ticketsByDay = await db.prepare(`
-      SELECT created_at::date as day, COUNT(*) as count
+      SELECT date(created_at) as day, COUNT(*) as count
       FROM tickets ${compFilter}
-      GROUP BY created_at::date
+      GROUP BY date(created_at)
       ORDER BY day DESC
       LIMIT 14
     `).all(...params);
