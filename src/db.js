@@ -1,10 +1,15 @@
 require('dotenv').config();
 const Database = require("better-sqlite3");
 const path = require("path");
+const fs = require("fs");
 const bcrypt = require("bcryptjs");
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, "..", "data", "ticketing.db");
+const dbDir = process.env.DB_DIR || path.join(__dirname, "..", "data");
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
 
+const dbPath = process.env.DB_PATH || path.join(dbDir, "ticketing.db");
 const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
