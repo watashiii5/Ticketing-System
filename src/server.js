@@ -1847,7 +1847,7 @@ async function renderHome(
 
             <p class="filter-note"><span>Showing ${displayedTickets.length} ticket(s)</span><span><a href="/search?${filterQuery}">Permalink</a> • <a href="/">Clear filters</a></span></p>
             <ul class="tickets">
-              ${rows || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
+              ${queueHtml || "<li class=\"empty\">No tickets yet. Add the first request above.</li>"}
             </ul>
           </section>
         </main>
