@@ -1,16 +1,23 @@
 const nodemailer = require("nodemailer");
 
-const transport = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: false,
-  auth: process.env.SMTP_USER
-    ? {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      }
-    : undefined,
-});
+let transport = null;
+
+function getTransport() {
+  if (!transport && process.env.SMTP_HOST) {
+    transport = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: false,
+      auth: process.env.SMTP_USER
+        ? {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          }
+        : undefined,
+    });
+  }
+  return transport;
+}
 
 function sendTicketNotification({ subject, text, to }) {
   const finalTo = to || process.env.NOTIFY_TO;
@@ -21,8 +28,8 @@ function sendTicketNotification({ subject, text, to }) {
 
   const from = process.env.NOTIFY_FROM || "service-desk@acme.test";
 
-  transport
-    .sendMail({ from, to: finalTo, subject, text })
+  getTransport()
+    ?.sendMail({ from, to: finalTo, subject, text })
     .catch((err) => console.error("Notification error", err));
 }
 

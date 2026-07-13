@@ -7,11 +7,11 @@ const crypto = require("crypto");
 const compression = require("compression");
 const { db, initializeDatabase } = require("./db");
 const { sendTicketNotification } = require("./notifications");
-const nodemailer = require("nodemailer");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use(compression());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -96,6 +96,16 @@ app.use(async (req, res, next) => {
       return next();
     }
 
+    const now = Date.now();
+    const CACHE_TTL = 5 * 60 * 1000;
+    const cached = req.session._cache;
+
+    if (cached && cached.userId === req.session.userId && (now - cached.at) < CACHE_TTL) {
+      req.user = cached.user;
+      req.company = cached.company;
+      return next();
+    }
+
     const user = await db
       .prepare("SELECT id, name, role, company_id FROM users WHERE id = ?")
       .get(req.session.userId);
@@ -107,6 +117,8 @@ app.use(async (req, res, next) => {
     } else {
       req.company = null;
     }
+
+    req.session._cache = { userId: req.session.userId, user: req.user, company: req.company, at: now };
     next();
   } catch (err) {
     console.error("Session middleware error:", err.message);
@@ -837,6 +849,7 @@ app.get("/search", requireAuth, requireCompanyActive, async (req, res) => {
         LEFT JOIN users assignee ON assignee.id = tickets.assignee_id
         ${whereClause}
         ORDER BY tickets.id DESC
+        LIMIT 100
       `
     )
     .all(...params);
@@ -1654,7 +1667,7 @@ function renderTicketListHtml(tickets, commentsByTicketId, attachmentsByTicketId
         </li>
       `
   ).join("");
-  return `${queueHtml}`;
+  return `<ul id="ticket-queue-list" class="ticket-list" style="list-style: none; padding: 0;">${rows}</ul>`;
 }
 
 async function renderHome(
@@ -1695,6 +1708,9 @@ async function renderHome(
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>IT Ticketing Desk</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/introjs.min.css" />
       </head>
@@ -2308,6 +2324,9 @@ function renderLogin(error = "") {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Login • Service Desk</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2392,6 +2411,9 @@ function renderSignup(message = "") {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Company signup</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2498,6 +2520,9 @@ function renderCompanyAdmin(company, plans, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Manage ${escapeHtml(company.name)} · Platform Admin</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2592,6 +2617,9 @@ function renderBillingGate(currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Trial expired</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2657,6 +2685,9 @@ function renderCompanySettings(company, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Company settings</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2808,6 +2839,9 @@ function renderBilling(company, payments, plans, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Billing & Plans</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -2920,6 +2954,9 @@ function renderCompanyLanding(company) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(company.name)} Service Desk</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3047,6 +3084,9 @@ function renderPlatformAdmin(companies, payments, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Platform Admin</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3154,6 +3194,9 @@ function renderForgot(message = "") {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Reset password</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3218,6 +3261,9 @@ function renderInviteAccept(token, message = "") {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Accept Invite</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3279,6 +3325,9 @@ function renderReset(token, error = "") {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Choose new password</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3376,6 +3425,9 @@ function renderUserAdmin(users, invites, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>User Admin</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3559,6 +3611,9 @@ function renderAdminPlans(plans, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Manage Plans</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3664,6 +3719,9 @@ function renderAuditLogs(logs, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Audit Logs</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -3745,6 +3803,9 @@ function renderReports(metrics, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Reports</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -4043,6 +4104,9 @@ function renderSuperAdminDashboard(data, currentUser) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Platform Admin · Service Desk</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
@@ -4206,6 +4270,9 @@ function renderPublicLanding() {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Service Desk - Modern Ticketing</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
