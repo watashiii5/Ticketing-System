@@ -1522,12 +1522,17 @@ app.post("/invite/:token", async (req, res) => {
   res.send(renderLogin("Invite accepted. You can sign in now."));
 });
 
-const feedbackTransport = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
-  ? nodemailer.createTransport({
+let feedbackTransport = null;
+function getFeedbackTransport() {
+  if (!feedbackTransport && process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    const nodemailer = require("nodemailer");
+    feedbackTransport = nodemailer.createTransport({
       service: "gmail",
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-    })
-  : null;
+    });
+  }
+  return feedbackTransport;
+}
 
 app.post("/feedback", requireAuth, async (req, res) => {
   const message = (req.body.message || "").trim();
@@ -1542,7 +1547,7 @@ app.post("/feedback", requireAuth, async (req, res) => {
     new Date().toISOString()
   );
 
-  if (feedbackTransport) {
+  if (getFeedbackTransport()) {
     try {
       const credRow = await db.prepare("SELECT email FROM credentials WHERE user_id = ?").get(req.user.id);
       const userEmail = credRow ? credRow.email : null;
