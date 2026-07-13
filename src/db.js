@@ -91,10 +91,9 @@ const db = {
   transaction(fn) {
     return async function (...args) {
       const client = await pool.connect();
+      const originalQuery = pool.query;
       try {
         await client.query("BEGIN");
-        // Temporarily replace pool.query with client.query for this transaction
-        const originalQuery = pool.query;
         pool.query = (text, params) => client.query(text, params);
         
         const result = await fn(...args);
@@ -104,7 +103,7 @@ const db = {
         return result;
       } catch (e) {
         await client.query("ROLLBACK");
-        pool.query = pool.query;
+        pool.query = originalQuery;
         throw e;
       } finally {
         client.release();

@@ -21,6 +21,8 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     },
   })
 );
@@ -58,23 +60,30 @@ const upload = multer({
 });
 
 app.use(async (req, res, next) => {
-  if (!req.session.userId) {
-    req.user = null;
-    return next();
-  }
+  try {
+    if (!req.session.userId) {
+      req.user = null;
+      return next();
+    }
 
-  const user = await db
-    .prepare("SELECT id, name, role, company_id FROM users WHERE id = ?")
-    .get(req.session.userId);
-  req.user = user || null;
-  if (req.user && req.user.company_id) {
-    req.company = await db
-    .prepare("SELECT id, name, slug, brand_color, logo_url, invite_required, allowed_domains, status, plan, trial_ends_at FROM companies WHERE id = ?")
-      .get(req.user.company_id);
-  } else {
+    const user = await db
+      .prepare("SELECT id, name, role, company_id FROM users WHERE id = ?")
+      .get(req.session.userId);
+    req.user = user || null;
+    if (req.user && req.user.company_id) {
+      req.company = await db
+      .prepare("SELECT id, name, slug, brand_color, logo_url, invite_required, allowed_domains, status, plan, trial_ends_at FROM companies WHERE id = ?")
+        .get(req.user.company_id);
+    } else {
+      req.company = null;
+    }
+    next();
+  } catch (err) {
+    console.error("Session middleware error:", err.message);
+    req.user = null;
     req.company = null;
+    next();
   }
-  next();
 });
 
 app.get("/login", async (req, res) => {
@@ -440,7 +449,7 @@ app.get("/", async (req, res, next) => {
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
     
-    const incomeRow = await db.prepare("SELECT SUM(CAST(REPLACE(REPLACE(amount, '$', ''), ' USD / ₱', '') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
+    const incomeRow = await db.prepare("SELECT SUM(CAST(regexp_replace(amount, '^[$ ]*([0-9]+).*', '\\1') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
     const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0; // naive string parsing estimate
     
     const auditLogs = await db.prepare(`
@@ -945,9 +954,10 @@ app.post("/tickets/:id/sla", requireAuth, requireAgent, requireCompanyActive, as
     return res.status(400).send("Invalid SLA date.");
   }
 
-  await db.prepare("UPDATE tickets SET sla_due_at = ? WHERE id = ?").run(
+  await db.prepare("UPDATE tickets SET sla_due_at = ? WHERE id = ? AND company_id = ?").run(
     parsed.toISOString(),
-    id
+    id,
+    req.user.company_id
   );
   await notifyTicketSla(id, parsed.toISOString(), req.user);
   await logAudit(
@@ -963,7 +973,7 @@ app.post("/tickets/:id/sla", requireAuth, requireAgent, requireCompanyActive, as
 
 app.post("/tickets/:id/delete", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
   const id = Number(req.params.id);
-  await db.prepare("DELETE FROM tickets WHERE id = ?").run(id);
+  await db.prepare("DELETE FROM tickets WHERE id = ? AND company_id = ?").run(id, req.user.company_id);
   await logAudit(req.user.id, req.user.company_id, "ticket.delete", "ticket", id, "deleted");
   res.redirect("/");
 });
@@ -1455,6 +1465,12 @@ app.post("/feedback", requireAuth, async (req, res) => {
   res.redirect("/");
 });
 
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).send("<h1>Something went wrong</h1><p>Please try again.</p>");
+});
+
 // Only auto-start when run directly (not when imported by Vercel API handler)
 if (require.main === module) {
   initializeDatabase().then(() => {
@@ -1502,7 +1518,7 @@ async function renderHome(
   const rows = displayedTickets
     .map(
       (ticket) => `
-        <li class="ticket bg-${ticket.priority}">
+        <li class="ticket bg-${escapeHtml(ticket.priority)}">
           <div class="ticket-header">
             <div>
               <h3>${escapeHtml(ticket.title)}</h3>
@@ -1515,8 +1531,8 @@ async function renderHome(
               )}</p>
             </div>
             <div class="meta">
-              <span class="badge status ${ticket.status}">${formatStatus(ticket.status)}</span>
-              <span class="badge priority ${ticket.priority}">${ticket.priority}</span>
+              <span class="badge status ${escapeHtml(ticket.status)}">${escapeHtml(formatStatus(ticket.status))}</span>
+              <span class="badge priority ${escapeHtml(ticket.priority)}">${escapeHtml(ticket.priority)}</span>
               ${renderPriorityMeta(ticket.priority_confidence, ticket.priority_reason)}
                 ${renderSlaBadge(ticket.sla_due_at)}
                 <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
@@ -1595,7 +1611,7 @@ async function renderHome(
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="${currentCompany?.logo_url ? escapeHtml(currentCompany.logo_url) : '/static/logo.png'}" alt="Logo" style="height:32px;border-radius:8px;"> ${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
-              <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.role)})</p>
             </div>
             <div class="top-actions">
               ${
@@ -1777,7 +1793,7 @@ async function renderHome(
             <h3 style="margin:0 0 4px 0;">Send Feedback</h3>
             <p style="color:var(--muted);font-size:13px;margin:0 0 16px 0;">Your feedback goes directly to the developer.</p>
             <form action="/feedback" method="post" style="display:flex;flex-direction:column;gap:12px;">
-              <textarea name="message" required rows="4" placeholder="Bug report, feature request, or general feedback..." style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+              <textarea name="message" required rows="4" placeholder="Bug report, feature request, or general feedback..." style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
               <div style="display:flex;gap:10px;justify-content:flex-end;">
                 <button type="button" class="ghost" onclick="document.getElementById('feedback-modal').style.display='none'" style="padding:8px 18px;">Cancel</button>
                 <button type="submit" class="primary-btn" style="padding:8px 18px;">Send</button>
@@ -2123,14 +2139,6 @@ function renderTrialBanner(currentCompany) {
   }
 
   return "";
-}
-
-function renderOptionList(optionsHtml, selectedId) {
-  if (!selectedId) return optionsHtml;
-  return optionsHtml.replace(
-    new RegExp(`value=\"${selectedId}\"`, "g"),
-    `value=\"${selectedId}\" selected`
-  );
 }
 
 function renderLogin(error = "") {
@@ -2494,7 +2502,7 @@ function renderCompanySettings(company, currentUser) {
         </main>
         <script>
           const el = document.getElementById('share-url');
-          if (el) el.textContent = window.location.origin + '/c/${escapeHtml(company.slug || "")}';
+          if (el) el.textContent = window.location.origin + '/c/' + ${JSON.stringify(company.slug || "")};
         </script>
       
     <script>
@@ -3006,7 +3014,7 @@ function renderUserAdmin(users, invites, currentUser) {
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> User Admin</h2>
-              <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.role)})</p>
             </div>
             <div class="top-actions">
               <a class="ghost" href="/">Back to desk</a>
@@ -3264,7 +3272,7 @@ function renderAuditLogs(logs, currentUser) {
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Audit Logs</h2>
-              <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.role)})</p>
             </div>
             <div class="top-actions">
               <a class="ghost" href="/">Back to desk</a>
@@ -3330,7 +3338,7 @@ function renderReports(metrics, currentUser) {
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Reports</h2>
-              <p>Signed in as ${escapeHtml(currentUser.name)} (${currentUser.role})</p>
+              <p>Signed in as ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.role)})</p>
             </div>
             <div class="top-actions">
               <a class="ghost" href="/">Back to desk</a>
@@ -3547,7 +3555,7 @@ function renderAttachments(attachments = [], ticketId = 0) {
 }
 
 function renderOption(value, current, label = value) {
-  return `<option value="${value}" ${value === current ? "selected" : ""}>${label}</option>`;
+  return `<option value="${escapeHtml(value)}" ${value === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
 }
 
 function renderSuperAdminDashboard(data, currentUser) {
