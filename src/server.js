@@ -27,12 +27,20 @@ app.use(
   "/static",
   express.static(path.join(__dirname, "..", "public"), { maxAge: "7d", etag: true })
 );
+// On Vercel serverless, only /tmp is writable
+const isVercel = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
 const uploadsDir = process.env.UPLOADS_DIR
   ? path.resolve(process.env.UPLOADS_DIR)
-  : path.join(__dirname, "..", "uploads");
+  : isVercel
+    ? "/tmp/uploads"
+    : path.join(__dirname, "..", "uploads");
 const fs = require("fs");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (err) {
+  console.warn("Could not create uploads directory:", err.message);
 }
 app.use("/uploads", express.static(uploadsDir));
 
