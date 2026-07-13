@@ -1218,9 +1218,10 @@ app.post("/signup", async (req, res) => {
   }
 
   const now = new Date().toISOString();
+  const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const passwordHash = bcrypt.hashSync(password, 10);
   const createCompany = db.prepare(
-    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'pending', 'pending_plan', NULL, ?)"
+    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'active', 'starter', ?, ?)"
   );
   const createUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, 'agent', ?)"
@@ -1235,6 +1236,7 @@ app.post("/signup", async (req, res) => {
       slug || slugify(companyName),
       inviteRequired,
       finalDomains,
+      trialEndsAt,
       now
     )).lastInsertRowid;
     const userId = (await createUser.run(name, companyId)).lastInsertRowid;
@@ -1245,7 +1247,7 @@ app.post("/signup", async (req, res) => {
 
   try {
     req.session.userId = await transaction();
-    res.redirect("/billing");
+    res.redirect("/");
   } catch (err) {
     console.error("Signup error:", err);
     return res.status(400).send(renderSignup("This email or company name is already registered, or an error occurred. Please try a different email."));
@@ -1826,12 +1828,10 @@ async function requireCompanyActive(req, res, next) {
   }
 
   if (company.status === "active") {
-    return next();
-  }
-
-  const trialEndsAt = company.trial_ends_at ? new Date(company.trial_ends_at) : null;
-  if (trialEndsAt && Date.now() <= trialEndsAt.getTime()) {
-    return next();
+    if (!company.trial_ends_at) return next();
+    const trialEndsAt = new Date(company.trial_ends_at);
+    if (Date.now() <= trialEndsAt.getTime()) return next();
+    return res.status(402).send(renderBillingGate(req.user));
   }
 
   return res.status(402).send(renderBillingGate(req.user));
@@ -2047,32 +2047,25 @@ function renderPriorityMeta(confidence, reason) {
 
 function renderTrialBanner(currentCompany) {
   if (!currentCompany) return "";
-  if (currentCompany.status === "active") return "";
+  if (!currentCompany.trial_ends_at) return "";
 
-  if (currentCompany.trial_ends_at) {
-    const endsAt = new Date(currentCompany.trial_ends_at);
-    const msLeft = endsAt.getTime() - Date.now();
-    const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-    
-    if (daysLeft > 0) {
-      return `
-        <div class="trial-banner">
-          <strong>⏳ Free trial:</strong> ${daysLeft} day(s) remaining.
-          <span style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
-            <span style="font-size: 13px; opacity: 0.8;">Expires ${endsAt.toLocaleDateString()}</span>
-            <a href="/billing" style="background: white; color: var(--accent); padding: 4px 14px; border-radius: 4px; text-decoration: none; font-weight: 600;">Upgrade Now</a>
-          </span>
-        </div>
-      `;
-    }
+  const endsAt = new Date(currentCompany.trial_ends_at);
+  const msLeft = endsAt.getTime() - Date.now();
+  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+  
+  if (daysLeft > 0) {
+    return `
+      <div class="trial-banner">
+        <strong>⏳ Free trial:</strong> ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining.
+        <span style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
+          <span style="font-size: 13px; opacity: 0.8;">Expires ${endsAt.toLocaleDateString()}</span>
+          <a href="/billing" style="background: white; color: var(--accent); padding: 4px 14px; border-radius: 4px; text-decoration: none; font-weight: 600;">View Plans</a>
+        </span>
+      </div>
+    `;
   }
 
-  return `
-    <div class="trial-banner overdue">
-      <strong>🚫 Trial ended:</strong> Your access has expired. Please subscribe to continue.
-      <a href="/billing" style="background: white; color: #dc2626; padding: 4px 14px; border-radius: 4px; text-decoration: none; font-weight: 600; margin-left: auto;">Subscribe Now</a>
-    </div>
-  `;
+  return "";
 }
 
 function renderOptionList(optionsHtml, selectedId) {
@@ -2170,7 +2163,7 @@ function renderSignup(message = "") {
               <img src="/static/logo.png" alt="Logo" style="height: 64px; border-radius: 12px; margin-bottom: 16px;">
               <h1 style="margin: 0;">Create company account</h1>
             </div>
-            <p class="subtitle">Start with a 1-click setup. Payment is required before access.</p>
+            <p class="subtitle">Start your 30-day free trial. No credit card required.</p>
             ${message ? `<p class=\"notice\">${escapeHtml(message)}</p>` : ""}
             <form class="login-form" action="/signup" method="post">
               <label for="company_name">Company name</label>
@@ -2330,16 +2323,19 @@ function renderBillingGate(currentUser) {
         <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Billing required</title>
+        <title>Trial expired</title>
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body>
         <main class="shell login-shell">
           <section class="panel login-panel">
-            <h1>Payment required</h1>
-            <p class="subtitle">Your company account needs activation.</p>
-            <p class="notice">Submit payment to unlock access or continue your free trial.</p>
-            <a class="ghost" href="/billing">Go to billing</a>
+            <div style="text-align:center;">
+              <div style="font-size:48px; margin-bottom:12px;">⏳</div>
+              <h1 style="margin:0 0 8px 0;">Free trial has expired</h1>
+            </div>
+            <p class="subtitle">Your 30-day free trial has ended.</p>
+            <p class="notice">Paid plans are coming soon. We'll notify you when you can upgrade.</p>
+            <a class="ghost" href="/billing" style="display:inline-block; margin-bottom:12px;">View billing page</a>
             <form action="/logout" method="post" class="helper">
               <button type="submit" class="ghost">Log out</button>
             </form>
@@ -2468,19 +2464,18 @@ function renderCompanySettings(company, currentUser) {
 }
 
 function renderBilling(company, payments, plans, currentUser) {
-  const paymentRows = payments
-    .map(
-      (payment) => `
-        <tr>
-          <td>${escapeHtml(payment.method)}</td>
-          <td>${escapeHtml(payment.reference || "")}</td>
-          <td>${escapeHtml(payment.amount || "")}</td>
-          <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:white;background:${payment.status === 'paid' ? '#10b981' : payment.status === 'pending' ? '#f59e0b' : '#ef4444'}">${escapeHtml(payment.status)}</span></td>
-          <td>${new Date(payment.created_at).toLocaleString()}</td>
-        </tr>
-      `
-    )
-    .join("");
+  const planName = (company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1);
+
+  const trialInfo = company.trial_ends_at
+    ? (() => {
+        const endsAt = new Date(company.trial_ends_at);
+        const daysLeft = Math.ceil((endsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (daysLeft > 0) {
+          return `<p style="font-size:14px;color:var(--muted);">Free trial ends: ${endsAt.toLocaleDateString()} (${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining)</p>`;
+        }
+        return `<p style="font-size:14px;color:#dc2626;font-weight:600;">Free trial has expired.</p>`;
+      })()
+    : '';
 
   const features = {
     starter: ["Up to 5 agents", "100 tickets/month", "Email notifications", "Basic reports"],
@@ -2488,7 +2483,7 @@ function renderBilling(company, payments, plans, currentUser) {
     enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "Custom SLA rules", "Audit logs", "All Growth features"]
   };
 
-  let planCards = plans.map(p => {
+  const planCards = plans.map(p => {
     const isCurrent = company.plan === p.code;
     const featureList = (features[p.code] || ["Full access"]).map(f => `<li>✓ ${escapeHtml(f)}</li>`).join("");
     return `
@@ -2500,36 +2495,12 @@ function renderBilling(company, payments, plans, currentUser) {
         </div>
         <div class="plan-note">₱${p.price_php}/mo PHP</div>
         <ul>${featureList}</ul>
-        ${!isCurrent ? `<button type="button" class="primary-btn plan-cta" onclick="selectPlan('${escapeHtml(p.code)}','${escapeHtml(p.name)}','$${p.price_usd}','₱${p.price_php}')">Choose ${escapeHtml(p.name)}</button>` : `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`}
+        ${isCurrent
+          ? `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`
+          : `<button disabled class="plan-cta" style="opacity:0.5;cursor:not-allowed;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Coming Soon</button>`}
       </div>
     `;
   }).join("");
-
-  if (!company.trial_ends_at) {
-    const trialFeatures = ["Up to 3 agents", "50 tickets/month", "Basic reports", "30-day access"].map(f => `<li style="padding:4px 0;font-size:13px;">✓ ${escapeHtml(f)}</li>`).join("");
-    planCards += `
-      <div class="plan-card">
-        <span class="plan-badge" style="background:#f59e0b;">30 Days Only</span>
-        <h3 class="plan-title">Free Trial</h3>
-        <div>
-          <span class="plan-price">$0</span><span class="plan-note">/mo USD</span>
-        </div>
-        <div class="plan-note">No credit card required</div>
-        <ul>${trialFeatures}</ul>
-        <form action="/billing/trial" method="post">
-          <input type="hidden" name="plan" value="starter" />
-          <button type="submit" class="ghost plan-cta" style="border:2px solid #f59e0b;color:#d97706;">Start Free Trial</button>
-        </form>
-      </div>
-    `;
-  }
-
-
-  const trialInfo = company.trial_ends_at
-    ? `<p style="font-size:14px;color:var(--muted);">Trial expires: ${new Date(company.trial_ends_at).toLocaleDateString()}</p>`
-    : '';
-
-  const planName = (company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1);
 
   return `
     <!doctype html>
@@ -2546,7 +2517,7 @@ function renderBilling(company, payments, plans, currentUser) {
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Billing & Plans</h2>
-              <p>${escapeHtml(company.name)} • Status: <strong style="text-transform:capitalize;">${escapeHtml(company.status)}</strong> • Plan: <strong>${escapeHtml(planName)}</strong></p>
+              <p>${escapeHtml(company.name)} • Plan: <strong>${escapeHtml(planName)}</strong></p>
               ${trialInfo}
             </div>
             <div class="top-actions">
@@ -2558,95 +2529,32 @@ function renderBilling(company, payments, plans, currentUser) {
           </header>
 
           <section class="panel">
-            <h3>Choose Your Plan</h3>
-            <p class="subtitle">Select a plan that fits your team. Payment activates your account permanently.</p>
+            <div style="text-align:center; padding:32px 16px; background:linear-gradient(135deg, var(--glass-bg), var(--surface)); border-radius:16px; border:1px solid var(--border); margin-bottom:28px;">
+              <div style="font-size:48px; margin-bottom:12px;">🚧</div>
+              <h3 style="margin:0 0 8px 0;">Paid Plans Coming Soon</h3>
+              <p style="color:var(--muted); max-width:480px; margin:0 auto;">We're building secure payment integration. In the meantime, enjoy your 30-day free trial with full access to all Starter features.</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h3>Available Plans (Preview)</h3>
+            <p class="subtitle">These plans will be available once payments launch.</p>
             <div class="plan-grid" style="margin:20px 0;">
               ${planCards}
             </div>
           </section>
 
-          <section class="panel" id="payment-section" style="display:none;">
-            <h3 id="payment-title">Complete Payment</h3>
-            <p class="subtitle">Submit your payment details for the selected plan. We'll activate your account after verification.</p>
-            <form class="ticket-form" action="/billing/request" method="post">
-              <input type="hidden" id="selected-plan" name="plan" value="" />
-              <div>
-                <label>Selected plan</label>
-                <div class="readonly" id="plan-display">—</div>
-              </div>
-              <div>
-                <label for="method">Payment method</label>
-                <select id="method" name="method">
-                  <option value="stripe">Stripe (Card)</option>
-                  <option value="paypal">PayPal</option>
-                  <option value="gcash">GCash</option>
-                  <option value="bank">Bank Transfer</option>
-                </select>
-              </div>
-              <div id="reference-container" style="display:none;">
-                <label for="reference">Transaction Reference / ID</label>
-                <input id="reference" name="reference" placeholder="Paste your payment reference here" />
-              </div>
-              <div class="full actions">
-                <button type="submit" id="submit-payment-btn">Proceed to Checkout</button>
-              </div>
-            </form>
-            ${!company.trial_ends_at ? `
-              <form action="/billing/trial" method="post" style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
-                <input type="hidden" id="trial-plan" name="plan" value="" />
-                <button type="submit" class="ghost" style="width:100%; border:2px solid var(--accent); color:var(--accent);">Start 30-Day Free Trial Instead</button>
-                <p style="font-size:12px; color:var(--muted); text-align:center; margin-top:8px;">No credit card required for trial.</p>
-              </form>
-            ` : ''}
-          </section>
-
           <section class="panel">
-            <h3>Payment History</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Method</th>
-                    <th>Reference</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                    <th>Submitted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${paymentRows || "<tr><td colspan=\"5\">No payments yet.</td></tr>"}
-                </tbody>
-              </table>
+            <h3>Your Trial</h3>
+            <p class="subtitle">You currently have full access through your free trial.</p>
+            <div style="padding:16px; background:var(--glass-bg); border-radius:10px; border:1px solid var(--border); margin-top:12px;">
+              <p style="margin:0 0 4px 0;"><strong>Plan:</strong> ${escapeHtml(planName)}</p>
+              ${company.trial_ends_at
+                ? `<p style="margin:0;">Your free trial ${new Date(company.trial_ends_at).getTime() > Date.now() ? 'is active' : 'has ended'}. Paid billing will be available soon.</p>`
+                : `<p style="margin:0;">No trial active.</p>`}
             </div>
           </section>
         </main>
-        <script>
-          function selectPlan(code, name, usd, php) {
-            document.getElementById('selected-plan').value = code;
-            const trialInput = document.getElementById('trial-plan');
-            if (trialInput) trialInput.value = code;
-            document.getElementById('plan-display').textContent = name + ' — ' + usd + '/mo (' + php + '/mo)';
-            document.getElementById('payment-section').style.display = '';
-            document.getElementById('payment-section').scrollIntoView({ behavior: 'smooth' });
-          }
-
-          document.getElementById('method').addEventListener('change', function(e) {
-            const method = e.target.value;
-            const refContainer = document.getElementById('reference-container');
-            const refInput = document.getElementById('reference');
-            const submitBtn = document.getElementById('submit-payment-btn');
-            
-            if (method === 'stripe' || method === 'paypal') {
-              refContainer.style.display = 'none';
-              refInput.required = false;
-              submitBtn.textContent = 'Proceed to Checkout';
-            } else {
-              refContainer.style.display = 'block';
-              refInput.required = true;
-              submitBtn.textContent = 'Submit Payment';
-            }
-          });
-        </script>
       
     <script>
       (function() {
@@ -3806,17 +3714,8 @@ function renderPublicLanding() {
               <h1>Run support like a product, not a queue.</h1>
               <p>Intelligent triage, clean handoffs, and clear accountability for every request. Give your team a branded help desk that looks as sharp as it performs.</p>
               <div class="cta-group">
-                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
-                  <form action="/demo" method="post">
-                    <input type="hidden" name="role" value="agent" />
-                    <button type="submit" class="primary-btn glow-btn">🛠️ Try as IT Agent</button>
-                  </form>
-                  <form action="/demo" method="post">
-                    <input type="hidden" name="role" value="requester" />
-                    <button type="submit" class="primary-btn" style="background: linear-gradient(135deg, #f97316, #ea580c);">📝 Try as Requester</button>
-                  </form>
-                </div>
-                <p class="demo-note">Instant sandbox with sample data. No signup, no credit card.</p>
+                <a href="/signup" class="primary-btn glow-btn" style="text-decoration:none; display:inline-block;">Start Free Trial</a>
+                <p class="demo-note">30 days free. No credit card required.</p>
               </div>
             </div>
             <div class="hero-image-wrapper">
