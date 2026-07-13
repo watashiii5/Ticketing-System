@@ -60,6 +60,7 @@ const db = {
     const convertedSql = getCachedSql(sql);
     return {
       async run(...params) {
+        console.log("DB RUN:", sql);
         try {
           const result = await getExecutor().query(convertedSql, params);
           const row = result.rows[0];
@@ -73,6 +74,7 @@ const db = {
         }
       },
       async get(...params) {
+        console.log("DB GET:", sql);
         try {
           const result = await getExecutor().query(convertedSql, params);
           return result.rows[0] || null;
@@ -82,6 +84,7 @@ const db = {
         }
       },
       async all(...params) {
+        console.log("DB ALL:", sql);
         try {
           const result = await getExecutor().query(convertedSql, params);
           return result.rows || [];
@@ -103,6 +106,7 @@ const db = {
   },
 
   async query(sql, params = []) {
+    console.log("DB QUERY:", sql);
     try {
       const convertedSql = getCachedSql(sql);
       const result = await getExecutor().query(convertedSql, params);

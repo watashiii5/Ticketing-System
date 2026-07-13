@@ -12,7 +12,6 @@ const nodemailer = require("nodemailer");
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(compression());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
