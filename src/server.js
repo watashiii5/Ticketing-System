@@ -2123,6 +2123,12 @@ function getEffectivePlan(company) {
   return company.plan || 'free_trial';
 }
 
+function getPlanDisplayName(company) {
+  const plan = getEffectivePlan(company);
+  const names = { free_trial: 'Free Trial', starter: 'Starter', growth: 'Growth', enterprise: 'Enterprise' };
+  return names[plan] || 'Free Trial';
+}
+
 async function logAudit(actorId, companyId, action, entityType, entityId, details) {
   await db.prepare(
     "INSERT INTO audit_logs (actor_id, company_id, action, entity_type, entity_id, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -2700,7 +2706,7 @@ function renderCompanySettings(company, currentUser) {
           <header class="topbar">
             <div>
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Company settings</h2>
-              <p>${escapeHtml(company.name)} • Plan: ${escapeHtml((company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1))}</p>
+              <p>${escapeHtml(company.name)} • Plan: <strong>${escapeHtml(getPlanDisplayName(company))}</strong></p>
             </div>
             <div class="top-actions">
               <a class="ghost" href="/admin/users">Back to users</a>
@@ -2798,7 +2804,7 @@ function renderCompanySettings(company, currentUser) {
 }
 
 function renderBilling(company, payments, plans, currentUser) {
-  const planName = (company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1);
+  const planName = getPlanDisplayName(company);
 
   const trialInfo = company.trial_ends_at
     ? (() => {
@@ -2991,7 +2997,7 @@ function renderCompanyLanding(company) {
           <section class="panel landing">
             <div class="landing-header">
               <div>
-                <p class="eyebrow">${escapeHtml((company.plan === 'pending_plan' || !company.plan) ? 'Not Selected' : company.plan.charAt(0).toUpperCase() + company.plan.slice(1))} plan</p>
+                <p class="eyebrow">${escapeHtml(getPlanDisplayName(company))} plan</p>
                 <h1>${escapeHtml(company.name)} Service Desk</h1>
                 <p class="subtitle">Fast, structured IT support with clear priorities, SLAs, and real-time updates.</p>
               </div>
