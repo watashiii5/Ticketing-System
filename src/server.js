@@ -683,7 +683,7 @@ app.post("/tickets/:id/attachments/:attachmentId/delete", requireAuth, requireCo
 
   // Try to delete the file from disk
   const fs = require("fs");
-  const filePath = path.join(__dirname, "..", "uploads", attachment.stored_name);
+  const filePath = path.join(uploadsDir, attachment.stored_name);
   try { fs.unlinkSync(filePath); } catch {}
 
   await logAudit(req.user.id, req.user.company_id, "ticket.attachment.delete", "attachment", attachmentId, attachment.stored_name);
