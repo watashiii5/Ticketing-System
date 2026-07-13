@@ -1264,7 +1264,7 @@ app.post("/demo", async (req, res) => {
   const passwordHash = await bcrypt.hash("password123", 10);
 
   const createCompany = db.prepare(
-    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, 0, ?, 'active', 'starter', ?, ?)"
+    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, 0, ?, 'active', 'free_trial', ?, ?)"
   );
   const createUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, ?, ?)"
@@ -1328,7 +1328,7 @@ app.post("/signup", async (req, res) => {
   const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const passwordHash = await bcrypt.hash(password, 10);
   const createCompany = db.prepare(
-    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'active', 'starter', ?, ?)"
+    "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'active', 'free_trial', ?, ?)"
   );
   const createUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, 'agent', ?)"
@@ -2104,7 +2104,7 @@ function getPlanLimits(planCode) {
     growth:     { maxAgents: 20, maxTicketsPerMonth: -1, emailNotifications: true, advancedAnalytics: true, customBranding: true, apiAccess: false, customSla: false, auditLogs: false },
     enterprise: { maxAgents: -1, maxTicketsPerMonth: -1, emailNotifications: true, advancedAnalytics: true, customBranding: true, apiAccess: true, customSla: true, auditLogs: true },
   };
-  return limits[planCode] || limits.starter;
+  return limits[planCode] || limits.free_trial;
 }
 
 async function getCompanyAgentCount(companyId) {
@@ -2118,9 +2118,9 @@ async function getCompanyTicketsThisMonth(companyId) {
 }
 
 function getEffectivePlan(company) {
-  if (!company) return 'starter';
-  if (company.trial_ends_at && company.status !== 'active') return 'free_trial';
-  return company.plan || 'starter';
+  if (!company) return 'free_trial';
+  if (company.plan === 'free_trial' || (company.trial_ends_at && company.status !== 'active')) return 'free_trial';
+  return company.plan || 'free_trial';
 }
 
 async function logAudit(actorId, companyId, action, entityType, entityId, details) {
@@ -2817,24 +2817,45 @@ function renderBilling(company, payments, plans, currentUser) {
     enterprise: ["Unlimited agents", "Unlimited tickets", "Dedicated support", "API access", "Custom SLA rules", "Audit logs", "All Growth features"]
   };
 
-  const planCards = plans.map(p => {
-    const isCurrent = company.plan === p.code;
-    const featureList = (features[p.code] || ["Full access"]).map(f => `<li>✓ ${escapeHtml(f)}</li>`).join("");
-    return `
-      <div class="plan-card ${isCurrent ? 'is-current' : ''}">
-        ${isCurrent ? '<span class="plan-badge">Current Plan</span>' : ''}
-        <h3 class="plan-title">${escapeHtml(p.name)}</h3>
+  const planCards = (() => {
+    const trialCard = `
+      <div class="plan-card ${company.trial_ends_at ? 'is-current' : ''}">
+        ${company.trial_ends_at ? '<span class="plan-badge">Current Plan</span>' : ''}
+        <h3 class="plan-title">Free Trial</h3>
         <div>
-          <span class="plan-price">$${p.price_usd}</span><span class="plan-note">/mo USD</span>
+          <span class="plan-price">$0</span><span class="plan-note">/mo</span>
         </div>
-        <div class="plan-note">₱${p.price_php}/mo PHP</div>
-        <ul>${featureList}</ul>
-        ${isCurrent
+        <div class="plan-note">30 days included</div>
+        <ul>
+          <li>✓ Up to 3 agents</li>
+          <li>✓ 50 tickets/month</li>
+          <li>✓ Basic features</li>
+        </ul>
+        ${company.trial_ends_at
           ? `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`
           : `<button disabled class="plan-cta" style="opacity:0.5;cursor:not-allowed;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Coming Soon</button>`}
       </div>
     `;
-  }).join("");
+    const paidCards = plans.map(p => {
+      const isCurrent = company.plan === p.code;
+      const featureList = (features[p.code] || ["Full access"]).map(f => `<li>✓ ${escapeHtml(f)}</li>`).join("");
+      return `
+        <div class="plan-card ${isCurrent ? 'is-current' : ''}">
+          ${isCurrent ? '<span class="plan-badge">Current Plan</span>' : ''}
+          <h3 class="plan-title">${escapeHtml(p.name)}</h3>
+          <div>
+            <span class="plan-price">$${p.price_usd}</span><span class="plan-note">/mo USD</span>
+          </div>
+          <div class="plan-note">₱${p.price_php}/mo PHP</div>
+          <ul>${featureList}</ul>
+          ${isCurrent
+            ? `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`
+            : `<button disabled class="plan-cta" style="opacity:0.5;cursor:not-allowed;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Coming Soon</button>`}
+        </div>
+      `;
+    }).join("");
+    return trialCard + paidCards;
+  })();
 
   return `
     <!doctype html>
@@ -2875,7 +2896,7 @@ function renderBilling(company, payments, plans, currentUser) {
 
           <section class="panel">
             <h3>Available Plans (Preview)</h3>
-            <p class="subtitle">These plans will be available once payments launch.</p>
+            <p class="subtitle">You're currently on the Free Trial. Paid plans will be available soon.</p>
             <div class="plan-grid" style="margin:20px 0;">
               ${planCards}
             </div>
