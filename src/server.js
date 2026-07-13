@@ -817,15 +817,15 @@ app.get("/reports", requireAuth, requireAgent, requireCompanyActive, async (req,
   if (limits.advancedAnalytics) {
     const avgResolutionTime = await db.prepare(`
       SELECT AVG(
-        (CASE WHEN status = 'resolved' THEN strftime('%s', created_at) ELSE strftime('%s', 'now') END - strftime('%s', created_at))
+        (CASE WHEN status = 'resolved' THEN EXTRACT(EPOCH FROM created_at) ELSE EXTRACT(EPOCH FROM NOW()) END - EXTRACT(EPOCH FROM created_at))
       ) / 3600.0 as avg_hours
       FROM tickets ${compFilter}
     `).get(...params);
     
     const ticketsByDay = await db.prepare(`
-      SELECT date(created_at) as day, COUNT(*) as count
+      SELECT created_at::date as day, COUNT(*) as count
       FROM tickets ${compFilter}
-      GROUP BY date(created_at)
+      GROUP BY created_at::date
       ORDER BY day DESC
       LIMIT 14
     `).all(...params);
@@ -1403,14 +1403,20 @@ app.post("/invite/:token", async (req, res) => {
   res.send(renderLogin("Invite accepted. You can sign in now."));
 });
 
-initializeDatabase().then(() => {
-  app.listen(port, () => {
-    console.log(`Ticketing app running on http://localhost:${port}`);
+// Only auto-start when run directly (not when imported by Vercel API handler)
+if (require.main === module) {
+  initializeDatabase().then(() => {
+    app.listen(port, () => {
+      console.log(`Ticketing app running on http://localhost:${port}`);
+    });
+  }).catch(err => {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
   });
-}).catch(err => {
-  console.error("Failed to initialize database:", err);
-  process.exit(1);
-});
+}
+
+// Export for Vercel serverless and testing
+module.exports = { app, initializeDatabase };
 
 async function renderHome(
   tickets,

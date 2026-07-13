@@ -1,253 +1,339 @@
-require('dotenv').config();
-const Database = require("better-sqlite3");
-const path = require("path");
-const fs = require("fs");
+require("dotenv").config();
+const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
+const fs = require("fs");
+const path = require("path");
 
-const dbDir = process.env.DB_DIR || path.join(__dirname, "..", "data");
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+const pool = new Pool({
+  connectionString: process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.SUPABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+// Convert SQLite ? placeholders to PostgreSQL $1, $2, ...
+function convertPlaceholders(sql) {
+  let idx = 0;
+  const trimmed = sql.trim();
+  const isInsert = /^INSERT\s+INTO/i.test(trimmed);
+  const hasReturning = /RETURNING/i.test(trimmed);
+  
+  const converted = sql.replace(/\?/g, () => `$${++idx}`);
+  
+  // For INSERT statements, add RETURNING id if not already present
+  let finalSql = converted;
+  if (isInsert && !hasReturning) {
+    finalSql = converted + " RETURNING id";
+  }
+  
+  return finalSql;
 }
 
-const dbPath = process.env.DB_PATH || path.join(dbDir, "ticketing.db");
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("foreign_keys = ON");
-
+// Compatibility wrapper that mimics the SQLite `db.prepare().run/get/all` interface
+// but uses PostgreSQL via the pg pool
 const db = {
   prepare(sql) {
-    const stmt = sqlite.prepare(sql);
+    const convertedSql = convertPlaceholders(sql);
+    const stmt = { sql: convertedSql, originalSql: sql };
     return {
-      run(...params) {
-        const result = stmt.run(...params);
-        return { lastInsertRowid: result.lastInsertRowid, changes: result.changes };
+      async run(...params) {
+        try {
+          const result = await pool.query(stmt.sql, params);
+          const row = result.rows[0];
+          return {
+            lastInsertRowid: row ? row.id : null,
+            changes: result.rowCount,
+          };
+        } catch (err) {
+          console.error("DB run error:", stmt.originalSql, params, err.message);
+          throw err;
+        }
       },
-      get(...params) {
-        return stmt.get(...params) || null;
+      async get(...params) {
+        try {
+          const result = await pool.query(stmt.sql, params);
+          return result.rows[0] || null;
+        } catch (err) {
+          console.error("DB get error:", stmt.originalSql, params, err.message);
+          throw err;
+        }
       },
-      all(...params) {
-        return stmt.all(...params);
+      async all(...params) {
+        try {
+          const result = await pool.query(stmt.sql, params);
+          return result.rows || [];
+        } catch (err) {
+          console.error("DB all error:", stmt.originalSql, params, err.message);
+          throw err;
+        }
       },
     };
   },
 
-  exec(sql) {
-    sqlite.exec(sql);
+  async exec(sql) {
+    try {
+      await pool.query(sql);
+    } catch (err) {
+      console.error("DB exec error:", sql, err.message);
+      throw err;
+    }
   },
 
-  query(sql, params = []) {
-    return sqlite.prepare(sql).all(...params);
+  async query(sql, params = []) {
+    try {
+      const convertedSql = convertPlaceholders(sql);
+      const result = await pool.query(convertedSql, params);
+      return result.rows;
+    } catch (err) {
+      console.error("DB query error:", sql, params, err.message);
+      throw err;
+    }
   },
 
   transaction(fn) {
     return async function (...args) {
+      const client = await pool.connect();
       try {
-        sqlite.exec("BEGIN");
+        await client.query("BEGIN");
+        // Temporarily replace pool.query with client.query for this transaction
+        const originalQuery = pool.query;
+        pool.query = (text, params) => client.query(text, params);
+        
         const result = await fn(...args);
-        sqlite.exec("COMMIT");
+        
+        await client.query("COMMIT");
+        pool.query = originalQuery;
         return result;
       } catch (e) {
-        sqlite.exec("ROLLBACK");
+        await client.query("ROLLBACK");
+        pool.query = pool.query;
         throw e;
+      } finally {
+        client.release();
       }
     };
+  },
+  
+  getPool() {
+    return pool;
   },
 };
 
 async function initializeDatabase() {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS companies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      slug TEXT,
-      brand_color TEXT,
-      logo_url TEXT,
-      invite_required INTEGER NOT NULL DEFAULT 0,
-      allowed_domains TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      plan TEXT NOT NULL DEFAULT 'starter',
-      trial_ends_at TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS companies (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT,
+        brand_color TEXT,
+        logo_url TEXT,
+        invite_required INTEGER NOT NULL DEFAULT 0,
+        allowed_domains TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        plan TEXT NOT NULL DEFAULT 'starter',
+        trial_ends_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS tickets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      company_id INTEGER NOT NULL DEFAULT 1,
-      user_id INTEGER,
-      assignee_id INTEGER,
-      status TEXT NOT NULL DEFAULT 'open',
-      priority TEXT NOT NULL DEFAULT 'medium',
-      priority_confidence REAL,
-      priority_reason TEXT,
-      sla_due_at TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tickets (
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        company_id INTEGER NOT NULL DEFAULT 1,
+        user_id INTEGER,
+        assignee_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'open',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        priority_confidence REAL,
+        priority_reason TEXT,
+        sla_due_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      company_id INTEGER
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        company_id INTEGER
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS credentials (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL UNIQUE,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS credentials (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS comments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ticket_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      body TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS comments (
+        id BIGSERIAL PRIMARY KEY,
+        ticket_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS attachments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ticket_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      original_name TEXT NOT NULL,
-      stored_name TEXT NOT NULL,
-      mime_type TEXT NOT NULL,
-      size_bytes INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS attachments (
+        id BIGSERIAL PRIMARY KEY,
+        ticket_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      actor_id INTEGER,
-      company_id INTEGER,
-      action TEXT NOT NULL,
-      entity_type TEXT NOT NULL,
-      entity_id INTEGER,
-      details TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id BIGSERIAL PRIMARY KEY,
+        actor_id INTEGER,
+        company_id INTEGER,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER,
+        details TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS payment_requests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      company_id INTEGER NOT NULL,
-      owner_id INTEGER NOT NULL,
-      method TEXT NOT NULL,
-      reference TEXT,
-      amount TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      paid_at TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS payment_requests (
+        id BIGSERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        reference TEXT,
+        amount TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        paid_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS invites (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      company_id INTEGER NOT NULL,
-      email TEXT,
-      role TEXT NOT NULL DEFAULT 'requester',
-      token_hash TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      used_at TEXT
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS invites (
+        id BIGSERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL,
+        email TEXT,
+        role TEXT NOT NULL DEFAULT 'requester',
+        token_hash TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS reset_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      token_hash TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      used_at TEXT
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS reset_tokens (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ
+      )
+    `);
 
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL,
-      price_usd INTEGER NOT NULL,
-      price_php INTEGER NOT NULL,
-      icon TEXT
-    )
-  `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS plans (
+        id BIGSERIAL PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        price_usd INTEGER NOT NULL,
+        price_php INTEGER NOT NULL,
+        icon TEXT
+      )
+    `);
 
-  // ── Seed data ────────────────────────────────────────────────
-  const companyCount = sqlite.prepare("SELECT COUNT(*) as count FROM companies").get().count;
-  if (companyCount === 0) {
-    sqlite.prepare(
-      "INSERT INTO companies (name, status, plan, created_at) VALUES (?, ?, ?, ?)"
-    ).run("Acme", "active", "starter", new Date().toISOString());
-  }
-
-  sqlite.prepare(
-    "UPDATE companies SET slug = LOWER(REPLACE(name, ' ', '-')) WHERE slug IS NULL"
-  ).run();
-
-  const userCount = sqlite.prepare("SELECT COUNT(*) as count FROM users").get().count;
-  if (userCount === 0) {
-    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Avery Kim", "requester");
-    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Jordan Lee", "requester");
-    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Riley Patel", "requester");
-    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Morgan Diaz", "agent");
-    sqlite.prepare("INSERT INTO users (name, role) VALUES (?, ?)").run("Casey Ortiz", "agent");
-  }
-
-  const firstCompany = sqlite.prepare("SELECT id FROM companies ORDER BY id LIMIT 1").get();
-  if (firstCompany) {
-    sqlite.prepare("UPDATE users SET company_id = ? WHERE company_id IS NULL AND role != 'super_admin'").run(firstCompany.id);
-    sqlite.prepare("UPDATE tickets SET company_id = ? WHERE company_id IS NULL").run(firstCompany.id);
-  }
-
-  const credentialCount = sqlite.prepare("SELECT COUNT(*) as count FROM credentials").get().count;
-  if (credentialCount === 0) {
-    const users = sqlite.prepare("SELECT id, name, role FROM users").all();
-    const passwordHash = "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq";
-    for (const user of users) {
-      const email = `${user.name.toLowerCase().replace(/\s+/g, ".")}@acme.test`;
-      sqlite.prepare(
-        "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
-      ).run(user.id, email, passwordHash);
+    // ── Seed data ────────────────────────────────────────────────
+    const companyResult = await client.query("SELECT COUNT(*)::int as count FROM companies");
+    if (companyResult.rows[0].count === 0) {
+      await client.query(
+        "INSERT INTO companies (name, status, plan, created_at) VALUES ($1, $2, $3, NOW())",
+        ["Acme", "active", "starter"]
+      );
     }
-  }
 
-  const superAdmin = sqlite.prepare("SELECT id FROM users WHERE role = 'super_admin'").get();
-  if (!superAdmin) {
-    sqlite.prepare("DELETE FROM credentials WHERE email = ?").run("admin@platform.test");
-    const result = sqlite.prepare(
-      "INSERT INTO users (name, role, company_id) VALUES (?, ?, NULL)"
-    ).run("Platform Admin", "super_admin");
-    const superId = result.lastInsertRowid;
-    sqlite.prepare(
-      "INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)"
-    ).run(superId, "admin@platform.test", "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq");
-  }
+    await client.query(
+      "UPDATE companies SET slug = LOWER(REPLACE(name, ' ', '-')) WHERE slug IS NULL"
+    );
 
-  const planCount = sqlite.prepare("SELECT COUNT(*) as count FROM plans").get().count;
-  if (planCount === 0) {
-    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("starter", "Starter", 29, 1499, "🌱");
-    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("growth", "Growth", 99, 4999, "🚀");
-    sqlite.prepare("INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES (?, ?, ?, ?, ?)").run("enterprise", "Enterprise", 299, 14999, "🏢");
-  }
+    const userResult = await client.query("SELECT COUNT(*)::int as count FROM users");
+    if (userResult.rows[0].count === 0) {
+      await client.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Avery Kim", "requester"]);
+      await client.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Jordan Lee", "requester"]);
+      await client.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Riley Patel", "requester"]);
+      await client.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Morgan Diaz", "agent"]);
+      await client.query("INSERT INTO users (name, role) VALUES ($1, $2)", ["Casey Ortiz", "agent"]);
+    }
 
-  console.log("Database initialized successfully.");
+    const firstCompany = await client.query("SELECT id FROM companies ORDER BY id LIMIT 1");
+    if (firstCompany.rows.length > 0) {
+      await client.query(
+        "UPDATE users SET company_id = $1 WHERE company_id IS NULL AND role != 'super_admin'",
+        [firstCompany.rows[0].id]
+      );
+    }
+
+    const credResult = await client.query("SELECT COUNT(*)::int as count FROM credentials");
+    if (credResult.rows[0].count === 0) {
+      const users = await client.query("SELECT id, name, role FROM users");
+      const passwordHash = "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq";
+      for (const user of users.rows) {
+        const email = `${user.name.toLowerCase().replace(/\s+/g, ".")}@acme.test`;
+        await client.query(
+          "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
+          [user.id, email, passwordHash]
+        );
+      }
+    }
+
+    const superAdmin = await client.query("SELECT id FROM users WHERE role = 'super_admin' LIMIT 1");
+    if (superAdmin.rows.length === 0) {
+      await client.query("DELETE FROM credentials WHERE email = 'admin@platform.test'");
+      const result = await client.query(
+        "INSERT INTO users (name, role, company_id) VALUES ($1, $2, NULL) RETURNING id",
+        ["Platform Admin", "super_admin"]
+      );
+      const superId = result.rows[0].id;
+      await client.query(
+        "INSERT INTO credentials (user_id, email, password_hash) VALUES ($1, $2, $3)",
+        [superId, "admin@platform.test", "$2b$10$l.WyV73HE3EwPPxltruwxeQdDgLsb0YV4cPKUiArao3Bghh/eaedq"]
+      );
+    }
+
+    const planResult = await client.query("SELECT COUNT(*)::int as count FROM plans");
+    if (planResult.rows[0].count === 0) {
+      await client.query(
+        "INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)",
+        ["starter", "Starter", 29, 1499, "🌱"]
+      );
+      await client.query(
+        "INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)",
+        ["growth", "Growth", 99, 4999, "🚀"]
+      );
+      await client.query(
+        "INSERT INTO plans (code, name, price_usd, price_php, icon) VALUES ($1, $2, $3, $4, $5)",
+        ["enterprise", "Enterprise", 299, 14999, "🏢"]
+      );
+    }
+
+    console.log("Database initialized successfully.");
+  } catch (err) {
+    console.error("Database initialization error:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-module.exports = { db, pool: sqlite, initializeDatabase };
+module.exports = { db, pool, initializeDatabase };
