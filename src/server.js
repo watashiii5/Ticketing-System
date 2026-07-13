@@ -2119,7 +2119,8 @@ async function getCompanyTicketsThisMonth(companyId) {
 
 function getEffectivePlan(company) {
   if (!company) return 'free_trial';
-  if (company.plan === 'free_trial' || (company.trial_ends_at && company.status !== 'active')) return 'free_trial';
+  if (company.trial_ends_at && new Date(company.trial_ends_at).getTime() > Date.now()) return 'free_trial';
+  if (company.plan === 'free_trial') return 'free_trial';
   return company.plan || 'free_trial';
 }
 
@@ -2513,8 +2514,10 @@ function renderSignup(message = "") {
 
 
 function renderCompanyAdmin(company, plans, currentUser) {
+  const effectivePlan = getEffectivePlan(company);
+  const trialOption = `<option value="free_trial" ${effectivePlan === 'free_trial' ? 'selected' : ''}>Free Trial ($0)</option>`;
   const planOptions = plans.map(p => 
-    `<option value="${p.code}" ${company.plan === p.code ? 'selected' : ''}>${escapeHtml(p.name)} (${p.price_usd})</option>`
+    `<option value="${p.code}" ${effectivePlan === p.code ? 'selected' : ''}>${escapeHtml(p.name)} ($${p.price_usd})</option>`
   ).join("");
   
   const statusOptions = ['active', 'pending', 'blocked', 'suspended'].map(s => 
@@ -2557,6 +2560,7 @@ function renderCompanyAdmin(company, plans, currentUser) {
               <div>
                 <label>Company Plan</label>
                 <select name="plan">
+                  ${trialOption}
                   ${planOptions}
                   <option value="pending_plan" ${company.plan === 'pending_plan' ? 'selected' : ''}>Pending Selection</option>
                 </select>
@@ -3071,7 +3075,7 @@ function renderPlatformAdmin(companies, payments, currentUser) {
       (company) => `
         <tr>
           <td>${escapeHtml(company.name)}</td>
-          <td>${escapeHtml(company.plan)}</td>
+          <td>${escapeHtml(getPlanDisplayName(company))}</td>
           <td>${escapeHtml(company.status)}</td>
           <td>${company.users}</td>
           <td>${new Date(company.created_at).toLocaleString()}</td>
@@ -4110,7 +4114,7 @@ function renderSuperAdminDashboard(data, currentUser) {
       <tr>
         <td><strong>${escapeHtml(c.name)}</strong><br><span style="font-size:12px; color: var(--muted);">${escapeHtml(c.slug)}</span></td>
         <td><span class="badge" style="background:${statusColor}; color:white;">${escapeHtml(c.status)}</span></td>
-        <td>${escapeHtml((c.plan === 'pending_plan' || !c.plan) ? 'Not Selected' : c.plan.charAt(0).toUpperCase() + c.plan.slice(1))}</td>
+        <td>${escapeHtml(getPlanDisplayName(c))}</td>
         <td>${c.user_count}</td>
         <td>${c.ticket_count}</td>
         <td>${trialLabel}</td>
