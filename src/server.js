@@ -1774,7 +1774,29 @@ async function renderHome(
             <form class="ticket-form" action="/tickets" method="post" data-title="Create Tickets" data-intro="Need help? Fill out this form to submit a new request.">
               <div>
                 <label for="title">Title</label>
-                <input id="title" name="title" placeholder="Laptop won't boot" required />
+                <input id="title" name="title" list="title-suggestions" placeholder="Type or pick a suggestion..." required />
+                <datalist id="title-suggestions">
+                  <option value="Laptop won't boot">
+                  <option value="VPN not connecting">
+                  <option value="Cannot access email">
+                  <option value="Printer not working">
+                  <option value="Need new software installed">
+                  <option value="Screen is flickering">
+                  <option value="Keyboard keys not responding">
+                  <option value="Slow internet connection">
+                  <option value="Cannot access shared drive">
+                  <option value="Account locked out">
+                  <option value="Monitor replacement needed">
+                  <option value="Mouse not working">
+                  <option value="Blue screen error">
+                  <option value="Need password reset">
+                  <option value="Application crashing">
+                  <option value="WiFi keeps disconnecting">
+                  <option value="Webcam not detected">
+                  <option value="Need new hardware setup">
+                  <option value="File recovery needed">
+                  <option value="System running slow">
+                </datalist>
               </div>
               ${
                 currentUser.role === "agent"
