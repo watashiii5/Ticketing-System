@@ -2818,9 +2818,10 @@ function renderBilling(company, payments, plans, currentUser) {
   };
 
   const planCards = (() => {
+    const onTrial = company.trial_ends_at && new Date(company.trial_ends_at).getTime() > Date.now();
     const trialCard = `
-      <div class="plan-card ${company.trial_ends_at ? 'is-current' : ''}">
-        ${company.trial_ends_at ? '<span class="plan-badge">Current Plan</span>' : ''}
+      <div class="plan-card ${onTrial ? 'is-current' : ''}">
+        ${onTrial ? '<span class="plan-badge">Current Plan</span>' : ''}
         <h3 class="plan-title">Free Trial</h3>
         <div>
           <span class="plan-price">$0</span><span class="plan-note">/mo</span>
@@ -2831,13 +2832,13 @@ function renderBilling(company, payments, plans, currentUser) {
           <li>✓ 50 tickets/month</li>
           <li>✓ Basic features</li>
         </ul>
-        ${company.trial_ends_at
+        ${onTrial
           ? `<button disabled class="plan-cta" style="opacity:0.6;cursor:default;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Active Plan</button>`
           : `<button disabled class="plan-cta" style="opacity:0.5;cursor:not-allowed;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--muted);box-shadow:none;">Coming Soon</button>`}
       </div>
     `;
     const paidCards = plans.map(p => {
-      const isCurrent = company.plan === p.code;
+      const isCurrent = !onTrial && company.plan === p.code;
       const featureList = (features[p.code] || ["Full access"]).map(f => `<li>✓ ${escapeHtml(f)}</li>`).join("");
       return `
         <div class="plan-card ${isCurrent ? 'is-current' : ''}">
