@@ -852,6 +852,44 @@ html.dark-mode .introjs-helperLayer {
   box-shadow: 0 0 0 4000px rgba(0,0,0,0.6) !important;
 }
 
+html.dark-mode .introjs-tooltip {
+  background: rgba(20, 32, 36, 0.95) !important;
+  color: #f1f5f9 !important;
+  border-color: rgba(54, 72, 82, 0.8) !important;
+}
+
+html.dark-mode .introjs-tooltiptitle {
+  color: var(--accent) !important;
+}
+
+html.dark-mode .introjs-tooltiptext {
+  color: #e2e8f0 !important;
+}
+
+html.dark-mode .introjs-button {
+  color: #fff !important;
+}
+
+html.dark-mode .introjs-button.introjs-skipbutton {
+  color: #a7b4c0 !important;
+}
+
+html.dark-mode .introjs-bullets ul li a {
+  background: rgba(54, 72, 82, 0.6) !important;
+}
+
+html.dark-mode .introjs-bullets ul li a.active {
+  background: var(--accent) !important;
+}
+
+html.dark-mode .introjs-arrow {
+  border-bottom-color: rgba(20, 32, 36, 0.95) !important;
+}
+
+html.dark-mode .introjs-arrow.top {
+  border-top-color: rgba(20, 32, 36, 0.95) !important;
+}
+
 /* Enhanced button transitions and mobile touch targets */
 button, .primary-btn, .ghost, .tab-link, a.button {
   transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
