@@ -852,26 +852,44 @@ html.dark-mode .introjs-helperLayer {
   box-shadow: 0 0 0 4000px rgba(0,0,0,0.6) !important;
 }
 
-html.dark-mode .introjs-tooltip {
+html.dark-mode .introjs-tooltipReferenceLayer {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+html.dark-mode .introjs-tooltip,
+html.dark-mode .introjs-tooltipLayer {
   background: rgba(20, 32, 36, 0.95) !important;
   color: #f1f5f9 !important;
   border-color: rgba(54, 72, 82, 0.8) !important;
 }
 
-html.dark-mode .introjs-tooltiptitle {
-  color: var(--accent) !important;
+html.dark-mode .introjs-tooltip::after {
+  border-bottom-color: rgba(20, 32, 36, 0.95) !important;
 }
 
-html.dark-mode .introjs-tooltiptext {
+html.dark-mode .introjs-tooltip.top::after {
+  border-top-color: rgba(20, 32, 36, 0.95) !important;
+}
+
+html.dark-mode .introjs-tooltiptitle,
+html.dark-mode .introjs-tooltip .introjs-tooltip-title {
+  color: var(--accent) !important;
+  border-bottom-color: rgba(54, 72, 82, 0.5) !important;
+}
+
+html.dark-mode .introjs-tooltiptext,
+html.dark-mode .introjs-tooltip .introjs-tooltip-text {
   color: #e2e8f0 !important;
 }
 
-html.dark-mode .introjs-button {
+html.dark-mode .introjs-button,
+html.dark-mode .introjs-tooltip .introjs-button {
   color: #fff !important;
 }
 
 html.dark-mode .introjs-button.introjs-skipbutton {
   color: #a7b4c0 !important;
+  background: transparent !important;
 }
 
 html.dark-mode .introjs-bullets ul li a {
@@ -888,6 +906,22 @@ html.dark-mode .introjs-arrow {
 
 html.dark-mode .introjs-arrow.top {
   border-top-color: rgba(20, 32, 36, 0.95) !important;
+}
+
+html.dark-mode .introjs-arrow.right {
+  border-right-color: rgba(20, 32, 36, 0.95) !important;
+}
+
+html.dark-mode .introjs-arrow.left {
+  border-left-color: rgba(20, 32, 36, 0.95) !important;
+}
+
+html.dark-mode .introjs-progress {
+  background: rgba(54, 72, 82, 0.4) !important;
+}
+
+html.dark-mode .introjs-progress .introjs-progressbar {
+  background: var(--accent) !important;
 }
 
 /* Enhanced button transitions and mobile touch targets */

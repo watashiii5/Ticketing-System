@@ -1739,7 +1739,7 @@ async function renderHome(
                   `
                   : ""
               }
-              <button type="button" class="primary-btn glow-btn" onclick="introJs().setOption('showProgress', true).start()">Tutorial</button>
+              <button type="button" class="primary-btn glow-btn" onclick="startTutorial()">Tutorial</button>
               <button type="button" class="ghost" onclick="document.getElementById('feedback-modal').style.display='flex'">Feedback</button>
               <form action="/logout" method="post">
                 <button type="submit" class="ghost">Log out</button>
@@ -1997,6 +1997,41 @@ async function renderHome(
           }
         });
       });
+    </script>
+
+    <script>
+      function startTutorial() {
+        var isDark = document.documentElement.classList.contains('dark-mode');
+        var intro = introJs().setOption('showProgress', true);
+        intro.onafterchange(function(el) {
+          if (!isDark) return;
+          var layers = document.querySelectorAll('.introjs-tooltipReferenceLayer, .introjs-tooltipLayer');
+          layers.forEach(function(layer) { layer.style.background = 'rgba(0,0,0,0.2)'; });
+          var tooltip = document.querySelector('.introjs-tooltip');
+          if (!tooltip) return;
+          tooltip.style.background = 'rgba(20,32,36,0.95)';
+          tooltip.style.color = '#f1f5f9';
+          tooltip.style.borderColor = 'rgba(54,72,82,0.8)';
+          tooltip.style.boxShadow = '0 0 20px rgba(0,0,0,0.5)';
+          var title = tooltip.querySelector('.introjs-tooltip-title');
+          if (title) { title.style.color = '#2dd4bf'; title.style.borderBottomColor = 'rgba(54,72,82,0.5)'; }
+          var text = tooltip.querySelector('.introjs-tooltiptext');
+          if (text) text.style.color = '#e2e8f0';
+          var skipBtn = tooltip.querySelector('.introjs-skipbutton');
+          if (skipBtn) { skipBtn.style.color = '#a7b4c0'; skipBtn.style.background = 'transparent'; }
+          tooltip.querySelectorAll('.introjs-arrow').forEach(function(a) {
+            a.style.borderBottomColor = 'rgba(20,32,36,0.95)';
+            a.style.borderTopColor = 'rgba(20,32,36,0.95)';
+            a.style.borderRightColor = 'rgba(20,32,36,0.95)';
+            a.style.borderLeftColor = 'rgba(20,32,36,0.95)';
+          });
+          var progress = tooltip.querySelector('.introjs-progress');
+          if (progress) { progress.style.background = 'rgba(54,72,82,0.4)'; }
+          var bar = tooltip.querySelector('.introjs-progressbar');
+          if (bar) bar.style.background = '#2dd4bf';
+        });
+        intro.start();
+      }
     </script>
 
       </body>
