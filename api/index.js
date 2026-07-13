@@ -1,9 +1,11 @@
 // Vercel serverless entry point for the ticketing app
-// Simply imports and re-exports the Express app from server.js
+// Uses serverless-http to wrap Express for serverless compatibility
+const serverless = require("serverless-http");
 const { app, initializeDatabase } = require("../src/server");
 
 // Initialize database on cold start
 let initialized = false;
+const handler = serverless(app);
 
 module.exports = async (req, res) => {
   if (!initialized) {
@@ -11,10 +13,10 @@ module.exports = async (req, res) => {
       await initializeDatabase();
       initialized = true;
     } catch (err) {
-      console.error("Initial DB init error:", err.message);
+      console.error("DB init error on cold start:", err.message);
+      // Even if DB init fails, still try to handle the request
     }
   }
   
-  // Handle the request using the fully configured Express app from server.js
-  return app(req, res);
+  return handler(req, res);
 };
