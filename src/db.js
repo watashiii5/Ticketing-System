@@ -120,6 +120,14 @@ async function initializeDatabase() {
   const client = await pool.connect();
   try {
     await client.query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        sid TEXT PRIMARY KEY,
+        sess JSON NOT NULL,
+        expire TIMESTAMPTZ NOT NULL
+      )
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS companies (
         id BIGSERIAL PRIMARY KEY,
         name TEXT NOT NULL,

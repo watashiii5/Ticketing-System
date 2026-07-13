@@ -13,8 +13,36 @@ const port = process.env.PORT || 3000;
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+
+const { Store } = session;
+class PgStore extends Store {
+  async get(sid, cb) {
+    try {
+      const res = await db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expire > NOW()").get(sid);
+      cb(null, res ? res.sess : null);
+    } catch(e) { cb(e); }
+  }
+  async set(sid, sess, cb) {
+    try {
+      const expire = new Date(sess.cookie.expires || Date.now() + 86400000).toISOString();
+      await db.prepare(`
+        INSERT INTO sessions (sid, sess, expire) VALUES (?, ?, ?)
+        ON CONFLICT (sid) DO UPDATE SET sess = EXCLUDED.sess, expire = EXCLUDED.expire
+      `).run(sid, sess, expire);
+      cb(null);
+    } catch(e) { cb(e); }
+  }
+  async destroy(sid, cb) {
+    try {
+      await db.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
+      cb(null);
+    } catch(e) { cb(e); }
+  }
+}
+
 app.use(
   session({
+    store: new PgStore(),
     secret: process.env.SESSION_SECRET || "dev-secret",
     resave: false,
     saveUninitialized: false,
@@ -88,7 +116,7 @@ app.use(async (req, res, next) => {
 
 app.get("/login", async (req, res) => {
   if (req.user) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   res.send(renderLogin());
@@ -96,7 +124,7 @@ app.get("/login", async (req, res) => {
 
 app.get("/forgot", async (req, res) => {
   if (req.user) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   res.send(renderForgot());
@@ -141,7 +169,7 @@ app.post("/forgot", async (req, res) => {
 
 app.get("/reset/:token", async (req, res) => {
   if (req.user) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   res.send(renderReset(req.params.token));
@@ -259,7 +287,7 @@ app.post("/admin/users", requireAuth, requireAgent, requireCompanyActive, async 
     null,
     JSON.stringify({ name, email, role })
   );
-  res.redirect("/admin/users");
+  res.redirect(303, "/admin/users");
 });
 
 app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -277,7 +305,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActi
 
   await db.prepare("UPDATE credentials SET password_hash = ? WHERE user_id = ?").run(passwordHash, id);
   await logAudit(req.user.id, req.user.company_id, "user.reset_password", "user", id, "reset password");
-  res.redirect("/admin/users");
+  res.redirect(303, "/admin/users");
 });
 
 app.get("/admin/plans", requireAuth, requireSuperAdmin, async (req, res) => {
@@ -295,7 +323,7 @@ app.post("/admin/plans/:id", requireAuth, requireSuperAdmin, async (req, res) =>
   }
 
   await db.prepare("UPDATE plans SET price_usd = ?, price_php = ? WHERE id = ?").run(price_usd, price_php, id);
-  res.redirect("/admin/plans");
+  res.redirect(303, "/admin/plans");
 });
 
 app.post("/admin/invites", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -332,7 +360,7 @@ app.post("/admin/invites", requireAuth, requireAgent, requireCompanyActive, asyn
   });
 
   await logAudit(req.user.id, req.user.company_id, "invite.create", "company", req.user.company_id, email);
-  res.redirect("/admin/users");
+  res.redirect(303, "/admin/users");
 });
 
 app.get("/admin/company", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -373,7 +401,7 @@ app.post("/admin/company", requireAuth, requireAgent, requireCompanyActive, asyn
   );
 
   await logAudit(req.user.id, req.user.company_id, "company.update", "company", req.user.company_id, "settings");
-  res.redirect("/admin/company");
+  res.redirect(303, "/admin/company");
 });
 
 app.post("/login", async (req, res) => {
@@ -416,12 +444,12 @@ app.post("/login", async (req, res) => {
   }
 
   req.session.userId = record.user_id;
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/logout", async (req, res) => {
   req.session.destroy(() => {
-    res.redirect("/login");
+    res.redirect(303, "/login");
   });
 });
 
@@ -610,7 +638,7 @@ app.post("/tickets", requireAuth, requireCompanyActive, async (req, res) => {
     title
   );
 
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/tickets/:id/comment", requireAuth, requireCompanyActive, async (req, res) => {
@@ -635,7 +663,7 @@ app.post("/tickets/:id/comment", requireAuth, requireCompanyActive, async (req, 
     id,
     body.slice(0, 120)
   );
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post(
@@ -674,7 +702,7 @@ app.post(
       id,
       req.file.originalname
     );
-    res.redirect("/");
+    res.redirect(303, "/");
   }
 );
 
@@ -697,7 +725,7 @@ app.post("/tickets/:id/attachments/:attachmentId/delete", requireAuth, requireCo
   try { fs.unlinkSync(filePath); } catch {}
 
   await logAudit(req.user.id, req.user.company_id, "ticket.attachment.delete", "attachment", attachmentId, attachment.stored_name);
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.get("/search", requireAuth, requireCompanyActive, async (req, res) => {
@@ -887,7 +915,7 @@ app.post("/tickets/:id/status", requireAuth, requireAgent, requireCompanyActive,
   }
   await notifyTicketStatus(id, status, req.user);
   await logAudit(req.user.id, req.user.company_id, "ticket.status", "ticket", id, status);
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/tickets/:id/priority", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -913,7 +941,7 @@ app.post("/tickets/:id/priority", requireAuth, requireAgent, requireCompanyActiv
     id,
     reason ? `${priority} | ${reason}` : priority
   );
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/tickets/:id/assign", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -930,7 +958,7 @@ app.post("/tickets/:id/assign", requireAuth, requireAgent, requireCompanyActive,
     id,
     String(assigneeId || "none")
   );
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/tickets/:id/sla", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
@@ -968,14 +996,14 @@ app.post("/tickets/:id/sla", requireAuth, requireAgent, requireCompanyActive, as
     id,
     parsed.toISOString()
   );
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/tickets/:id/delete", requireAuth, requireAgent, requireCompanyActive, async (req, res) => {
   const id = Number(req.params.id);
   await db.prepare("DELETE FROM tickets WHERE id = ? AND company_id = ?").run(id, req.user.company_id);
   await logAudit(req.user.id, req.user.company_id, "ticket.delete", "ticket", id, "deleted");
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 
@@ -1008,7 +1036,7 @@ app.post("/admin/companies/:id/action", requireAuth, requireSuperAdmin, async (r
     });
     await transaction();
     await logAudit(req.user.id, 1, "admin.company_deleted", "company", id, "Company and all associated data deleted");
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   if (action === "update") {
@@ -1022,10 +1050,10 @@ app.post("/admin/companies/:id/action", requireAuth, requireSuperAdmin, async (r
     
     await db.prepare("UPDATE companies SET plan = ?, status = ?, trial_ends_at = ? WHERE id = ?").run(plan, status, trialEndsAt, id);
     await logAudit(req.user.id, 1, "admin.company_updated", "company", id, `Updated ${plan}, ${status}`);
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
   
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.get("/platform", requireAuth, requireSuperAdmin, async (req, res) => {
@@ -1065,14 +1093,14 @@ app.post("/platform/companies/:id/approve", requireAuth, requireSuperAdmin, asyn
   const id = Number(req.params.id);
   await db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(id);
   await logAudit(req.user.id, null, "company.approve", "company", id, "approved");
-  res.redirect("/platform");
+  res.redirect(303, "/platform");
 });
 
 app.post("/platform/companies/:id/suspend", requireAuth, requireSuperAdmin, async (req, res) => {
   const id = Number(req.params.id);
   await db.prepare("UPDATE companies SET status = 'suspended' WHERE id = ?").run(id);
   await logAudit(req.user.id, null, "company.suspend", "company", id, "suspended");
-  res.redirect("/platform");
+  res.redirect(303, "/platform");
 });
 
 app.post("/billing/verify", requireAuth, requireSuperAdmin, async (req, res) => {
@@ -1091,12 +1119,12 @@ app.post("/billing/verify", requireAuth, requireSuperAdmin, async (req, res) => 
   );
   await db.prepare("UPDATE companies SET status = 'active' WHERE id = ?").run(request.company_id);
   await logAudit(req.user.id, null, "billing.verified", "company", request.company_id, "paid");
-  res.redirect("/platform");
+  res.redirect(303, "/platform");
 });
 
 app.get("/signup", async (req, res) => {
   if (req.user) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
   res.send(renderSignup());
 });
@@ -1155,7 +1183,7 @@ app.post("/c/:slug/join", async (req, res) => {
 
   const userId = await transaction();
   req.session.userId = userId;
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/demo", async (req, res) => {
@@ -1197,7 +1225,7 @@ app.post("/demo", async (req, res) => {
   });
 
   req.session.userId = await transaction();
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 
@@ -1258,7 +1286,7 @@ app.post("/signup", async (req, res) => {
 
   try {
     req.session.userId = await transaction();
-    res.redirect("/");
+    res.redirect(303, "/");
   } catch (err) {
     console.error("Signup error:", err);
     return res.status(400).send(renderSignup("This email or company name is already registered, or an error occurred. Please try a different email."));
@@ -1267,7 +1295,7 @@ app.post("/signup", async (req, res) => {
 
 app.get("/billing", requireAuth, async (req, res) => {
   if (req.user.role === "super_admin") {
-    return res.redirect("/platform");
+    return res.redirect(303, "/platform");
   }
 
   const company = await db
@@ -1310,7 +1338,7 @@ app.post("/billing/request", requireAuth, async (req, res) => {
   ).run(company.id, req.user.id, method, reference, amount, new Date().toISOString());
 
   await logAudit(req.user.id, req.user.company_id, "billing.request", "company", company.id, `${planCode} via ${method}`);
-  res.redirect("/billing");
+  res.redirect(303, "/billing");
 });
 
 app.post("/billing/trial", requireAuth, async (req, res) => {
@@ -1329,7 +1357,7 @@ app.post("/billing/trial", requireAuth, async (req, res) => {
   await db.prepare("UPDATE companies SET plan = ?, trial_ends_at = ?, status = 'active' WHERE id = ?").run(planCode, trialEndsAt, company.id);
 
   await logAudit(req.user.id, req.user.company_id, "billing.trial_started", "company", company.id, `Trial for ${planCode}`);
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.post("/webhooks/stripe", async (req, res) => {
@@ -1372,7 +1400,7 @@ app.post("/webhooks/gcash", async (req, res) => {
 
 app.get("/invite/:token", async (req, res) => {
   if (req.user) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   res.send(renderInviteAccept(req.params.token));
@@ -1434,7 +1462,7 @@ const feedbackTransport = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWO
 app.post("/feedback", requireAuth, async (req, res) => {
   const message = (req.body.message || "").trim();
   if (!message) {
-    return res.redirect("/");
+    return res.redirect(303, "/");
   }
 
   await db.prepare("INSERT INTO feedback (user_id, company_id, message, created_at) VALUES (?, ?, ?, ?)").run(
@@ -1462,7 +1490,7 @@ app.post("/feedback", requireAuth, async (req, res) => {
     }
   }
 
-  res.redirect("/");
+  res.redirect(303, "/");
 });
 
 app.use((err, req, res, next) => {
@@ -1603,9 +1631,10 @@ async function renderHome(
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>IT Ticketing Desk</title>
         <link rel="stylesheet" href="/static/styles.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/introjs.min.css" />
       </head>
       <body>
-        <main class="shell" style="--brand:${
+        <main class="shell" data-title="Welcome!" data-intro="Welcome to your IT Service Desk. Let's take a quick tour." style="--brand:${
           currentCompany?.brand_color ? escapeHtml(currentCompany.brand_color) : "#d26a2b"
         }">
           <header class="topbar">
@@ -1613,7 +1642,7 @@ async function renderHome(
               <h2 style="display:flex;align-items:center;gap:12px;"><img src="${currentCompany?.logo_url ? escapeHtml(currentCompany.logo_url) : '/static/logo.png'}" alt="Logo" style="height:32px;border-radius:8px;"> ${escapeHtml(currentCompany?.name || "Service Desk")}</h2>
               <p>Signed in as ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.role)})</p>
             </div>
-            <div class="top-actions">
+            <div class="top-actions" data-title="Navigation" data-intro="Access reports, users, and settings from here.">
               ${
                 currentUser.role === "agent"
                   ? `
@@ -1624,6 +1653,7 @@ async function renderHome(
                   `
                   : ""
               }
+              <button type="button" class="primary-btn glow-btn" onclick="introJs().setOption('showProgress', true).start()">Tutorial</button>
               <button type="button" class="ghost" onclick="document.getElementById('feedback-modal').style.display='flex'">Feedback</button>
               <form action="/logout" method="post">
                 <button type="submit" class="ghost">Log out</button>
@@ -1631,7 +1661,7 @@ async function renderHome(
             </div>
           </header>
           ${trialBanner}
-          <section class="hero">
+          <section class="hero" data-title="Dashboard Stats" data-intro="Track your ticket volume and open issues at a glance.">
             <div>
               <p class="eyebrow">Internal IT Support</p>
               <h1>Ticketing Desk</h1>
@@ -1655,7 +1685,7 @@ async function renderHome(
           </section>
 
           <section class="panel">
-            <form class="ticket-form" action="/tickets" method="post">
+            <form class="ticket-form" action="/tickets" method="post" data-title="Create Tickets" data-intro="Need help? Fill out this form to submit a new request.">
               <div>
                 <label for="title">Title</label>
                 <input id="title" name="title" placeholder="Laptop won't boot" required />
@@ -1688,7 +1718,7 @@ async function renderHome(
             </form>
           </section>
 
-          <section class="panel">
+          <section class="panel" data-title="Your Queue" data-intro="View and manage your active and resolved tickets here. Use the tabs and filters to find what you need.">
             <h2 style="display:flex;align-items:center;gap:12px;"><img src="/static/logo.png" alt="Logo" style="height:32px;border-radius:8px;"> Queue</h2>
             <div class="tabs" style="margin-bottom: 20px;">
               <a href="/?tab=active" class="tab-link ${currentTab === 'active' ? 'is-active' : ''}">Active Tickets</a>
@@ -1820,6 +1850,7 @@ async function renderHome(
         });
       })();
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
   </body>
     </html>
   `;
@@ -1868,7 +1899,7 @@ async function getAttachmentsByTicketId(ticketIds) {
 
 function requireAuth(req, res, next) {
   if (!req.user) {
-    return res.redirect("/login");
+    return res.redirect(303, "/login");
   }
   next();
 }
@@ -1897,7 +1928,7 @@ async function requireCompanyActive(req, res, next) {
   }
 
   if (company.plan === "pending_plan") {
-    return res.redirect("/billing");
+    return res.redirect(303, "/billing");
   }
 
   if (company.status === "active") {
@@ -2912,6 +2943,52 @@ function renderForgot(message = "") {
       })();
     </script>
   </body>
+    </html>
+  `;
+}
+
+function renderInviteAccept(token, message = "") {
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <script>if(localStorage.getItem('theme')==='dark') document.documentElement.classList.add('dark-mode');</script>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Accept Invite</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <main class="shell login-shell">
+          <section class="panel login-panel">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <img src="/static/logo.png" alt="Logo" style="height: 64px; border-radius: 12px; margin-bottom: 16px;">
+              <h1 style="margin: 0;">Accept Invitation</h1>
+            </div>
+            ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
+            <form action="/invite/${escapeHtml(token)}" method="post" class="login-form">
+              <label for="name">Your Name</label>
+              <input type="text" id="name" name="name" required />
+              <label for="password">Choose Password</label>
+              <div class="password-field">
+                <input type="password" id="password" name="password" required />
+                <button type="button" class="icon-button" data-toggle="password">👁</button>
+              </div>
+              <button type="submit">Join Team</button>
+            </form>
+          </section>
+        </main>
+        <script>
+          document.querySelectorAll("[data-toggle='password']").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const input = btn.parentElement.querySelector("input");
+              const isPassword = input.type === "password";
+              input.type = isPassword ? "text" : "password";
+              btn.textContent = isPassword ? "🙈" : "👁";
+            });
+          });
+        </script>
+      </body>
     </html>
   `;
 }

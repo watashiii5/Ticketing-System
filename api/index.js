@@ -17,15 +17,7 @@ module.exports = async (req, res) => {
     }
   }
 
-  const originalPath =
-    req.headers["x-matched-path"] ||
-    req.headers["x-forwarded-uri"] ||
-    req.headers["x-original-url"] ||
-    req.headers["x-rewrite-url"];
-
-  if (originalPath && originalPath !== req.url) {
-    req.url = originalPath.startsWith("/") ? originalPath : "/" + originalPath;
-  }
+  // Removed originalPath rewriting logic to prevent routing issues.
 
   await new Promise((resolve) => {
     res.on("finish", resolve);
