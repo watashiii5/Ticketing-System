@@ -28,7 +28,8 @@ class PgStore extends Store {
       await db.prepare(`
         INSERT INTO sessions (sid, sess, expire) VALUES (?, ?, ?)
         ON CONFLICT (sid) DO UPDATE SET sess = EXCLUDED.sess, expire = EXCLUDED.expire
-      `).run(sid, sess, expire);
+        RETURNING sid
+      `).run(sid, JSON.stringify(sess), expire);
       cb(null);
     } catch(e) { cb(e); }
   }
