@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const pool = new Pool({
-  connectionString: process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL || process.env.SUPABASE_URL,
+  connectionString: process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
 });
 
