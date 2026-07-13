@@ -6,6 +6,7 @@ const multer = require("multer");
 const crypto = require("crypto");
 const { db, initializeDatabase } = require("./db");
 const { sendTicketNotification } = require("./notifications");
+const nodemailer = require("nodemailer");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -1413,6 +1414,44 @@ app.post("/invite/:token", async (req, res) => {
   res.send(renderLogin("Invite accepted. You can sign in now."));
 });
 
+const feedbackTransport = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    })
+  : null;
+
+app.post("/feedback", requireAuth, requireCompanyActive, async (req, res) => {
+  const message = (req.body.message || "").trim();
+  if (!message) {
+    return res.redirect("/");
+  }
+
+  await db.prepare("INSERT INTO feedback (user_id, company_id, message, created_at) VALUES (?, ?, ?, ?)").run(
+    req.user.id,
+    req.user.company_id,
+    message,
+    new Date().toISOString()
+  );
+
+  if (feedbackTransport) {
+    try {
+      await feedbackTransport.sendMail({
+        from: `"Service Desk Feedback" <${process.env.GMAIL_USER}>`,
+        to: "qtimescheduler@gmail.com",
+        replyTo: req.user.email || undefined,
+        subject: `[Feedback] ${req.user.name} (${req.company?.name || "unknown"})`,
+        text: `From: ${req.user.name} (${req.user.role})\nCompany: ${req.company?.name || "N/A"}\n\n${message}`,
+        html: `<p><strong>From:</strong> ${escapeHtml(req.user.name)} (${req.user.role})<br><strong>Company:</strong> ${escapeHtml(req.company?.name || "N/A")}</p><p>${escapeHtml(message).replace(/\n/g, "<br>")}</p>`,
+      });
+    } catch (err) {
+      console.error("Feedback email error:", err.message);
+    }
+  }
+
+  res.redirect("/");
+});
+
 // Only auto-start when run directly (not when imported by Vercel API handler)
 if (require.main === module) {
   initializeDatabase().then(() => {
@@ -1566,6 +1605,7 @@ async function renderHome(
                   `
                   : ""
               }
+              <button type="button" class="ghost" onclick="document.getElementById('feedback-modal').style.display='flex'">Feedback</button>
               <form action="/logout" method="post">
                 <button type="submit" class="ghost">Log out</button>
               </form>
@@ -1728,6 +1768,20 @@ async function renderHome(
             el.addEventListener('click', () => sessionStorage.setItem(SCROLL_KEY, window.scrollY));
           });
         </script>
+
+        <div id="feedback-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none'">
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:28px;width:90%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin:0 0 4px 0;">Send Feedback</h3>
+            <p style="color:var(--muted);font-size:13px;margin:0 0 16px 0;">Your feedback goes directly to the developer.</p>
+            <form action="/feedback" method="post" style="display:flex;flex-direction:column;gap:12px;">
+              <textarea name="message" required rows="4" placeholder="Bug report, feature request, or general feedback..." style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+              <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button" class="ghost" onclick="document.getElementById('feedback-modal').style.display='none'" style="padding:8px 18px;">Cancel</button>
+                <button type="submit" class="primary-btn" style="padding:8px 18px;">Send</button>
+              </div>
+            </form>
+          </div>
+        </div>
       
     <script>
       (function() {

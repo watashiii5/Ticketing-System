@@ -254,6 +254,16 @@ async function initializeDatabase() {
       )
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS feedback (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER,
+        company_id INTEGER,
+        message TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     // ── Seed data ────────────────────────────────────────────────
     const companyResult = await client.query("SELECT COUNT(*)::int as count FROM companies");
     if (companyResult.rows[0].count === 0) {
