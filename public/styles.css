@@ -771,3 +771,177 @@ th { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-sp
     align-items: flex-start;
   }
 }
+
+/* Intro.js Theme Overrides */
+.introjs-tooltip {
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: 1px solid var(--border) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  font-family: "DM Sans", sans-serif !important;
+  animation: introjs-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+}
+
+@keyframes introjs-pop {
+  0% { transform: scale(0.8) translateY(10px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.introjs-tooltiptext {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.introjs-tooltiptitle {
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.introjs-button {
+  background: var(--accent) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 6px !important;
+  text-shadow: none !important;
+  font-weight: 500 !important;
+  padding: 8px 16px !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 0 10px var(--ring) !important;
+}
+
+.introjs-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+  box-shadow: 0 0 15px var(--ring) !important;
+}
+
+.introjs-button.introjs-disabled {
+  background: var(--muted) !important;
+  opacity: 0.5 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  transform: none;
+}
+
+.introjs-helperLayer {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(2px) !important;
+  border: 2px solid var(--accent) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 0 4000px rgba(0,0,0,0.4) !important;
+  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+.introjs-bullets ul li a.active {
+  background: var(--accent) !important;
+  box-shadow: 0 0 8px var(--accent) !important;
+}
+
+.introjs-bullets ul li a {
+  background: var(--muted) !important;
+  transition: all 0.2s ease !important;
+}
+
+html.dark-mode .introjs-helperLayer {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 4000px rgba(0,0,0,0.6) !important;
+}
+
+/* Enhanced button transitions and mobile touch targets */
+button, .primary-btn, .ghost, .tab-link, a.button {
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+button:active, .primary-btn:active, .ghost:active, .tab-link:active {
+  transform: scale(0.95) !important;
+}
+
+@media (max-width: 700px) {
+  /* Increase touch targets for mobile */
+  button, .primary-btn, .ghost, .tab-link, input, select, textarea {
+    min-height: 44px;
+    padding: 10px 16px !important;
+    font-size: 16px !important; /* Prevents iOS auto-zoom on input */
+  }
+  
+  /* Better spacing for ticket list on mobile */
+  #ticket-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .ticket {
+    padding: 20px;
+    border-radius: 12px;
+  }
+  
+  .ticket-actions form {
+    margin-bottom: 8px;
+  }
+  
+  .meta {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  /* Fix sticky top actions for mobile */
+  .top-actions button {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Enhanced Auth Forms */
+.login-panel {
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  transform: translateY(0);
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s;
+}
+
+.login-panel:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 40px 80px -30px rgba(12, 30, 33, 0.4), 0 0 0 1px var(--accent);
+}
+
+.helper {
+  margin: 16px 0 !important;
+  font-size: 15px;
+}
+
+.helper a {
+  text-decoration: none !important;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.2s, padding-left 0.2s;
+  display: inline-block;
+}
+
+.helper a:hover {
+  color: var(--accent);
+  padding-left: 4px;
+}
+
+.helper a::before {
+  content: '?';
+  opacity: 0;
+  margin-right: 4px;
+  transform: translateX(-10px);
+  display: inline-block;
+  transition: all 0.2s;
+}
+
+.helper a:hover::before {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.password-field input {
+  padding-right: 40px;
+}

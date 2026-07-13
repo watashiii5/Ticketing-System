@@ -578,6 +578,53 @@ app.get("/", async (req, res, next) => {
   );
 });
 
+
+app.get("/api/queue", requireAuth, requireCompanyActive, async (req, res) => {
+  const isAgent = req.user.role === "agent";
+  
+  let query = `
+    SELECT
+      tickets.id,
+      tickets.title,
+      tickets.description,
+      tickets.status,
+      tickets.priority,
+      tickets.priority_confidence,
+      tickets.priority_reason,
+      tickets.sla_due_at,
+      tickets.created_at,
+      tickets.assignee_id,
+      requester.name as requester_name,
+      requester.role as requester_role,
+      assignee.name as assignee_name
+    FROM tickets
+    LEFT JOIN users requester ON requester.id = tickets.user_id
+    LEFT JOIN users assignee ON assignee.id = tickets.assignee_id
+  `;
+  let queryParams = [];
+
+  if (isAgent) {
+    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC";
+    queryParams.push(req.user.company_id);
+  } else {
+    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC";
+    queryParams.push(req.user.company_id, req.user.id);
+  }
+
+  const tickets = await db.prepare(query).all(...queryParams);
+
+  const ticketIds = tickets.map((ticket) => ticket.id);
+  const commentsByTicketId = ticketIds.length
+    ? await getCommentsByTicketId(ticketIds)
+    : {};
+  const attachmentsByTicketId = ticketIds.length
+    ? await getAttachmentsByTicketId(ticketIds)
+    : {};
+
+  const html = renderTicketListHtml(tickets, commentsByTicketId, attachmentsByTicketId, req.user, req.query.tab || 'active');
+  res.send(html);
+});
+
 app.post("/tickets", requireAuth, requireCompanyActive, async (req, res) => {
   const title = (req.body.title || "").trim();
   const description = (req.body.description || "").trim();
@@ -1515,38 +1562,15 @@ if (require.main === module) {
 // Export for Vercel serverless and testing
 module.exports = { app, initializeDatabase };
 
-async function renderHome(
-  tickets,
-  users,
-  commentsByTicketId,
-  attachmentsByTicketId,
-  filters = null,
-  currentUser,
-  currentCompany,
-  ticketUsageHtml = ""
-) {
-  const agentOptions = users
-    .filter((user) => user.role === "agent")
-    .map((user) => `<option value="${user.id}">${escapeHtml(user.name)}</option>`)
-    .join("");
 
-  const filterStatus = filters?.status || "all";
-  const filterPriority = filters?.priority || "all";
-  const filterTerm = filters?.term || "";
-  const trialBanner = renderTrialBanner(currentCompany);
-
-  const filterParams = { status: filterStatus, q: filterTerm };
-  if (currentUser.role === "agent") {
-    filterParams.priority = filterPriority;
-  }
-  const filterQuery = new URLSearchParams(filterParams).toString();
-  
-  const currentTab = filters?.tab || 'active';
+function renderTicketListHtml(tickets, commentsByTicketId, attachmentsByTicketId, currentUser, currentTab = 'active') {
   const displayedTickets = tickets.filter(t => currentTab === 'active' ? t.status !== 'resolved' : t.status === 'resolved');
 
-  const rows = displayedTickets
-    .map(
-      (ticket) => `
+  if (displayedTickets.length === 0) {
+    return `<ul id="ticket-queue-list" class="ticket-list" style="list-style: none; padding: 0;"><li style="text-align: center; padding: 40px; color: var(--muted);">No tickets found.</li></ul>`;
+  }
+
+  const rows = displayedTickets.map(ticket => `
         <li class="ticket bg-${escapeHtml(ticket.priority)}">
           <div class="ticket-header">
             <div>
@@ -1563,8 +1587,8 @@ async function renderHome(
               <span class="badge status ${escapeHtml(ticket.status)}">${escapeHtml(formatStatus(ticket.status))}</span>
               <span class="badge priority ${escapeHtml(ticket.priority)}">${escapeHtml(ticket.priority)}</span>
               ${renderPriorityMeta(ticket.priority_confidence, ticket.priority_reason)}
-                ${renderSlaBadge(ticket.sla_due_at)}
-                <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
+              ${renderSlaBadge(ticket.sla_due_at)}
+              <span class="timestamp">${new Date(ticket.created_at).toLocaleString()}</span>
             </div>
           </div>
           <div class="ticket-actions">
@@ -1614,14 +1638,45 @@ async function renderHome(
               ${renderAttachments(attachmentsByTicketId[ticket.id], ticket.id)}
             </ul>
             <form action="/tickets/${ticket.id}/attachments" method="post" enctype="multipart/form-data" class="attachment-form">
-              <input type="file" name="attachment" required />
+              <input type="file" name="attachment" accept="image/*" capture="environment" required />
               <button type="submit">Upload</button>
             </form>
           </div>
         </li>
       `
-    )
+  ).join("");
+  return `${queueHtml}`;
+}
+
+async function renderHome(
+  tickets,
+  users,
+  commentsByTicketId,
+  attachmentsByTicketId,
+  filters = null,
+  currentUser,
+  currentCompany,
+  ticketUsageHtml = ""
+) {
+  const agentOptions = users
+    .filter((user) => user.role === "agent")
+    .map((user) => `<option value="${user.id}">${escapeHtml(user.name)}</option>`)
     .join("");
+
+  const filterStatus = filters?.status || "all";
+  const filterPriority = filters?.priority || "all";
+  const filterTerm = filters?.term || "";
+  const trialBanner = renderTrialBanner(currentCompany);
+
+  const filterParams = { status: filterStatus, q: filterTerm };
+  if (currentUser.role === "agent") {
+    filterParams.priority = filterPriority;
+  }
+  const filterQuery = new URLSearchParams(filterParams).toString();
+  
+  const currentTab = filters?.tab || 'active';
+  const displayedTickets = tickets.filter(t => currentTab === 'active' ? t.status !== 'resolved' : t.status === 'resolved');
+  const queueHtml = renderTicketListHtml(tickets, commentsByTicketId, attachmentsByTicketId, currentUser, currentTab);
 
   return `
     <!doctype html>
@@ -1851,6 +1906,53 @@ async function renderHome(
         });
       })();
     </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/morphdom/2.7.0/morphdom-umd.min.js"></script>
+    <script>
+      let isPollingPaused = false;
+
+      document.addEventListener('focusin', (e) => {
+        if (e.target.closest('#ticket-queue-list') && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) {
+          isPollingPaused = true;
+        }
+      });
+
+      document.addEventListener('focusout', (e) => {
+        if (e.target.closest('#ticket-queue-list')) {
+          isPollingPaused = false;
+        }
+      });
+
+      async function pollQueue() {
+        if (isPollingPaused) {
+          setTimeout(pollQueue, 3000);
+          return;
+        }
+        try {
+          const tab = new URLSearchParams(window.location.search).get('tab') || 'active';
+          const res = await fetch('/api/queue?tab=' + tab);
+          if (res.ok) {
+            const html = await res.text();
+            const currentQueue = document.getElementById('ticket-queue-list');
+            if (currentQueue) {
+              morphdom(currentQueue, html, {
+                onBeforeElUpdated: function(fromEl, toEl) {
+                  if (fromEl === document.activeElement && (fromEl.tagName === 'INPUT' || fromEl.tagName === 'TEXTAREA' || fromEl.tagName === 'SELECT')) {
+                    return false;
+                  }
+                  return true;
+                }
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Polling error:', err);
+        }
+        setTimeout(pollQueue, 3000);
+      }
+      setTimeout(pollQueue, 3000);
+    </script>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
   </body>
     </html>
