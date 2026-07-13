@@ -150,7 +150,7 @@ app.post("/forgot", async (req, res) => {
 
   if (record) {
     const rawToken = crypto.randomBytes(20).toString("hex");
-    const tokenHash = bcrypt.hashSync(rawToken, 10);
+    const tokenHash = await bcrypt.hash(rawToken, 10);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
     await db.prepare(
@@ -190,17 +190,21 @@ app.post("/reset/:token", async (req, res) => {
     .all();
 
   const now = Date.now();
-  const matched = tokens.find((row) => {
-    if (row.used_at) return false;
-    if (new Date(row.expires_at).getTime() < now) return false;
-    return bcrypt.compareSync(token, row.token_hash);
-  });
+  let matched = null;
+  for (const row of tokens) {
+    if (row.used_at) continue;
+    if (new Date(row.expires_at).getTime() < now) continue;
+    if (await bcrypt.compare(token, row.token_hash)) {
+      matched = row;
+      break;
+    }
+  }
 
   if (!matched) {
     return res.status(400).send(renderReset(token, "Invalid or expired token."));
   }
 
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   await db.prepare("UPDATE credentials SET password_hash = ? WHERE user_id = ?").run(
     passwordHash,
     matched.user_id
@@ -267,7 +271,7 @@ app.post("/admin/users", requireAuth, requireAgent, requireCompanyActive, async 
   }
 
 
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   const insertUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, ?, ?)"
   );
@@ -298,7 +302,7 @@ app.post("/admin/users/:id/reset", requireAuth, requireAgent, requireCompanyActi
     return res.status(400).send("Password required.");
   }
 
-  const passwordHash = bcrypt.hashSync(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, 10);
   const user = await db.prepare("SELECT company_id FROM users WHERE id = ?").get(id);
   if (!user || user.company_id !== req.user.company_id) {
     return res.status(403).send("Not allowed.");
@@ -346,7 +350,7 @@ app.post("/admin/invites", requireAuth, requireAgent, requireCompanyActive, asyn
   }
 
   const rawToken = crypto.randomBytes(20).toString("hex");
-  const tokenHash = bcrypt.hashSync(rawToken, 10);
+  const tokenHash = await bcrypt.hash(rawToken, 10);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   await db.prepare(
@@ -424,7 +428,7 @@ app.post("/login", async (req, res) => {
     )
     .get(email);
 
-  if (!record || !bcrypt.compareSync(password, record.password_hash)) {
+  if (!record || !await bcrypt.compare(password, record.password_hash)) {
     return res.status(401).send(renderLogin("Invalid credentials."));
   }
 
@@ -1219,7 +1223,7 @@ app.post("/c/:slug/join", async (req, res) => {
   const existing = await db.prepare("SELECT user_id FROM credentials WHERE email = ?").get(email);
   if (existing) return res.status(400).send("Email already in use.");
 
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   const createUser = db.prepare("INSERT INTO users (name, role, company_id) VALUES (?, 'requester', ?)");
   const createCred = db.prepare("INSERT INTO credentials (user_id, email, password_hash) VALUES (?, ?, ?)");
   
@@ -1241,7 +1245,7 @@ app.post("/demo", async (req, res) => {
   const slug = `demo-${randomStr}`;
   const now = new Date().toISOString();
   const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const passwordHash = bcrypt.hashSync("password123", 10);
+  const passwordHash = await bcrypt.hash("password123", 10);
 
   const createCompany = db.prepare(
     "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, 0, ?, 'active', 'starter', ?, ?)"
@@ -1306,7 +1310,7 @@ app.post("/signup", async (req, res) => {
 
   const now = new Date().toISOString();
   const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   const createCompany = db.prepare(
     "INSERT INTO companies (name, slug, invite_required, allowed_domains, status, plan, trial_ends_at, created_at) VALUES (?, ?, ?, ?, 'active', 'starter', ?, ?)"
   );
@@ -1469,17 +1473,21 @@ app.post("/invite/:token", async (req, res) => {
     .all();
 
   const now = Date.now();
-  const matched = invites.find((row) => {
-    if (row.used_at) return false;
-    if (new Date(row.expires_at).getTime() < now) return false;
-    return bcrypt.compareSync(token, row.token_hash);
-  });
+  let matched = null;
+  for (const row of invites) {
+    if (row.used_at) continue;
+    if (new Date(row.expires_at).getTime() < now) continue;
+    if (await bcrypt.compare(token, row.token_hash)) {
+      matched = row;
+      break;
+    }
+  }
 
   if (!matched) {
     return res.status(400).send(renderInviteAccept(token, "Invalid or expired invite."));
   }
 
-  const passwordHash = bcrypt.hashSync(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   const createUser = db.prepare(
     "INSERT INTO users (name, role, company_id) VALUES (?, ?, ?)"
   );
@@ -1954,7 +1962,22 @@ async function renderHome(
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2339,7 +2362,22 @@ function renderLogin(error = "") {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2418,7 +2456,22 @@ function renderSignup(message = "") {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2509,7 +2562,22 @@ function renderCompanyAdmin(company, plans, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2559,7 +2627,22 @@ function renderBillingGate(currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2657,7 +2740,22 @@ function renderCompanySettings(company, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2773,7 +2871,22 @@ function renderBilling(company, payments, plans, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2861,7 +2974,22 @@ function renderCompanyLanding(company) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -2996,7 +3124,22 @@ function renderPlatformAdmin(companies, payments, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3045,7 +3188,22 @@ function renderForgot(message = "") {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3091,6 +3249,21 @@ function renderInviteAccept(token, message = "") {
             });
           });
         </script>
+      
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
       </body>
     </html>
   `;
@@ -3152,7 +3325,22 @@ function renderReset(token, error = "") {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3328,7 +3516,22 @@ function renderUserAdmin(users, invites, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3403,7 +3606,22 @@ function renderAdminPlans(plans, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3492,6 +3710,21 @@ function renderAuditLogs(logs, currentUser) {
             });
           })();
         </script>
+      
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
       </body>
     </html>
   `;
@@ -3626,7 +3859,22 @@ function renderReports(metrics, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -3928,7 +4176,22 @@ function renderSuperAdminDashboard(data, currentUser) {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
@@ -4049,7 +4312,22 @@ function renderPublicLanding() {
         });
       })();
     </script>
-  </body>
+  
+    <script>
+      document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => {
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            setTimeout(() => {
+              btn.disabled = true;
+              btn.innerHTML = '<span class="spinner"></span> Processing...';
+            }, 10);
+          }
+        });
+      });
+    </script>
+
+      </body>
     </html>
   `;
 }
