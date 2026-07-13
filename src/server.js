@@ -1421,7 +1421,7 @@ const feedbackTransport = process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWO
     })
   : null;
 
-app.post("/feedback", requireAuth, requireCompanyActive, async (req, res) => {
+app.post("/feedback", requireAuth, async (req, res) => {
   const message = (req.body.message || "").trim();
   if (!message) {
     return res.redirect("/");
@@ -1436,13 +1436,16 @@ app.post("/feedback", requireAuth, requireCompanyActive, async (req, res) => {
 
   if (feedbackTransport) {
     try {
+      const credRow = await db.prepare("SELECT email FROM credentials WHERE user_id = ?").get(req.user.id);
+      const userEmail = credRow ? credRow.email : null;
+
       await feedbackTransport.sendMail({
         from: `"Service Desk Feedback" <${process.env.GMAIL_USER}>`,
         to: "qtimescheduler@gmail.com",
-        replyTo: req.user.email || undefined,
+        replyTo: userEmail || undefined,
         subject: `[Feedback] ${req.user.name} (${req.company?.name || "unknown"})`,
-        text: `From: ${req.user.name} (${req.user.role})\nCompany: ${req.company?.name || "N/A"}\n\n${message}`,
-        html: `<p><strong>From:</strong> ${escapeHtml(req.user.name)} (${req.user.role})<br><strong>Company:</strong> ${escapeHtml(req.company?.name || "N/A")}</p><p>${escapeHtml(message).replace(/\n/g, "<br>")}</p>`,
+        text: `From: ${req.user.name} (${req.user.role})\nCompany: ${req.company?.name || "N/A"}\nEmail: ${userEmail || "N/A"}\n\n${message}`,
+        html: `<p><strong>From:</strong> ${escapeHtml(req.user.name)} (${req.user.role})<br><strong>Company:</strong> ${escapeHtml(req.company?.name || "N/A")}<br><strong>Email:</strong> ${escapeHtml(userEmail || "N/A")}</p><p>${escapeHtml(message).replace(/\n/g, "<br>")}</p>`,
       });
     } catch (err) {
       console.error("Feedback email error:", err.message);
