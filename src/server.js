@@ -4,6 +4,7 @@ const session = require("express-session");
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const crypto = require("crypto");
+const compression = require("compression");
 const { db, initializeDatabase } = require("./db");
 const { sendTicketNotification } = require("./notifications");
 const nodemailer = require("nodemailer");
@@ -11,6 +12,7 @@ const nodemailer = require("nodemailer");
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use(compression());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -18,7 +20,7 @@ const { Store } = session;
 class PgStore extends Store {
   async get(sid, cb) {
     try {
-      const res = await db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expire > NOW()").get(sid);
+      const res = await db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expire > ?").get(sid, new Date().toISOString());
       cb(null, res ? res.sess : null);
     } catch(e) { cb(e); }
   }
@@ -183,17 +185,15 @@ app.post("/reset/:token", async (req, res) => {
     return res.status(400).send(renderReset(token, "Password required."));
   }
 
+  // Only load tokens that are unused AND unexpired — avoids wasting bcrypt cycles on dead tokens
   const tokens = await db
     .prepare(
-      "SELECT id, user_id, token_hash, expires_at, used_at FROM reset_tokens ORDER BY id DESC LIMIT 25"
+      "SELECT id, user_id, token_hash, expires_at FROM reset_tokens WHERE used_at IS NULL AND expires_at > ? ORDER BY id DESC LIMIT 10"
     )
-    .all();
+    .all(new Date().toISOString());
 
-  const now = Date.now();
   let matched = null;
   for (const row of tokens) {
-    if (row.used_at) continue;
-    if (new Date(row.expires_at).getTime() < now) continue;
     if (await bcrypt.compare(token, row.token_hash)) {
       matched = row;
       break;
@@ -468,37 +468,41 @@ app.get("/", async (req, res, next) => {
 
   // Super admin gets a completely different management dashboard
   if (isSuper) {
-    const companies = await db.prepare(`
-      SELECT c.id, c.name, c.slug, c.status, c.plan, c.trial_ends_at, c.created_at,
-        (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) as user_count,
-        (SELECT COUNT(*) FROM tickets t WHERE t.company_id = c.id) as ticket_count
-      FROM companies c ORDER BY c.created_at DESC
-    `).all();
+    // Run all independent queries in parallel instead of sequentially
+    const [companies, totalTicketsRow, resolvedTicketsRow, totalUsersRow, freeTrialUsersRow, incomeRow, auditLogs, payments] = await Promise.all([
+      db.prepare(`
+        SELECT c.id, c.name, c.slug, c.status, c.plan, c.trial_ends_at, c.created_at,
+          (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) as user_count,
+          (SELECT COUNT(*) FROM tickets t WHERE t.company_id = c.id) as ticket_count
+        FROM companies c ORDER BY c.created_at DESC
+      `).all(),
+      db.prepare("SELECT COUNT(*) as cnt FROM tickets").get(),
+      db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get(),
+      db.prepare("SELECT COUNT(*) as cnt FROM users").get(),
+      db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > ?").get(new Date().toISOString()),
+      db.prepare("SELECT SUM(CAST(regexp_replace(amount, '^[$ ]*([0-9]+).*', '\\1') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get(),
+      db.prepare(`
+        SELECT al.action, al.details, al.created_at, u.name as actor_name
+        FROM audit_logs al
+        LEFT JOIN users u ON u.id = al.actor_id
+        ORDER BY al.created_at DESC LIMIT 20
+      `).all(),
+      db.prepare(`
+        SELECT pr.id, pr.method, pr.reference, pr.amount, pr.status, pr.created_at, c.name as company_name
+        FROM payment_requests pr
+        JOIN companies c ON c.id = pr.company_id
+        ORDER BY pr.id DESC
+        LIMIT 50
+      `).all(),
+    ]);
 
-    const totalTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets").get())).cnt;
-    const resolvedTickets = ((await db.prepare("SELECT COUNT(*) as cnt FROM tickets WHERE status = 'resolved'").get())).cnt;
-    const totalUsers = ((await db.prepare("SELECT COUNT(*) as cnt FROM users").get())).cnt;
-    const freeTrialUsers = ((await db.prepare("SELECT COUNT(u.id) as cnt FROM users u JOIN companies c ON c.id = u.company_id WHERE c.status = 'active' AND c.trial_ends_at > ?").get(new Date().toISOString()))).cnt;
+    const totalTickets = totalTicketsRow.cnt;
+    const resolvedTickets = resolvedTicketsRow.cnt;
+    const totalUsers = totalUsersRow.cnt;
+    const freeTrialUsers = freeTrialUsersRow.cnt;
+    const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0;
     const activeCompanies = companies.filter(c => c.status === "active").length;
     const trialCompanies = companies.filter(c => c.status === "pending").length;
-    
-    const incomeRow = await db.prepare("SELECT SUM(CAST(regexp_replace(amount, '^[$ ]*([0-9]+).*', '\\1') as INTEGER)) as total_income FROM payment_requests WHERE status = 'verified'").get();
-    const totalIncomeUsd = incomeRow && incomeRow.total_income ? incomeRow.total_income : 0; // naive string parsing estimate
-    
-    const auditLogs = await db.prepare(`
-      SELECT al.action, al.details, al.created_at, u.name as actor_name
-      FROM audit_logs al
-      LEFT JOIN users u ON u.id = al.actor_id
-      ORDER BY al.created_at DESC LIMIT 20
-    `).all();
-
-    const payments = await db.prepare(`
-      SELECT pr.id, pr.method, pr.reference, pr.amount, pr.status, pr.created_at, c.name as company_name
-      FROM payment_requests pr
-      JOIN companies c ON c.id = pr.company_id
-      ORDER BY pr.id DESC
-      LIMIT 50
-    `).all();
 
     return res.send(renderSuperAdminDashboard({
       companies,
@@ -538,10 +542,10 @@ app.get("/", async (req, res, next) => {
   let queryParams = [];
 
   if (isAgent) {
-    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC";
+    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC LIMIT 50";
     queryParams.push(req.user.company_id);
   } else {
-    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC";
+    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC LIMIT 50";
     queryParams.push(req.user.company_id, req.user.id);
   }
 
@@ -608,10 +612,10 @@ app.get("/api/queue", requireAuth, requireCompanyActive, async (req, res) => {
   let queryParams = [];
 
   if (isAgent) {
-    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC";
+    query += " WHERE tickets.company_id = ? ORDER BY tickets.id DESC LIMIT 50";
     queryParams.push(req.user.company_id);
   } else {
-    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC";
+    query += " WHERE tickets.company_id = ? AND tickets.user_id = ? ORDER BY tickets.id DESC LIMIT 50";
     queryParams.push(req.user.company_id, req.user.id);
   }
 
@@ -1466,17 +1470,15 @@ app.post("/invite/:token", async (req, res) => {
     return res.status(400).send(renderInviteAccept(token, "Name and password required."));
   }
 
+  // Only load invites that are unused AND unexpired — avoids wasting bcrypt cycles on dead invites
   const invites = await db
     .prepare(
-      "SELECT id, company_id, email, role, token_hash, expires_at, used_at FROM invites ORDER BY id DESC LIMIT 50"
+      "SELECT id, company_id, email, role, token_hash, expires_at FROM invites WHERE used_at IS NULL AND expires_at > ? ORDER BY id DESC LIMIT 10"
     )
-    .all();
+    .all(new Date().toISOString());
 
-  const now = Date.now();
   let matched = null;
   for (const row of invites) {
-    if (row.used_at) continue;
-    if (new Date(row.expires_at).getTime() < now) continue;
     if (await bcrypt.compare(token, row.token_hash)) {
       matched = row;
       break;
@@ -1933,7 +1935,7 @@ async function renderHome(
 
       async function pollQueue() {
         if (isPollingPaused) {
-          setTimeout(pollQueue, 3000);
+          setTimeout(pollQueue, 10000);
           return;
         }
         try {
@@ -1956,9 +1958,9 @@ async function renderHome(
         } catch (err) {
           console.error('Polling error:', err);
         }
-        setTimeout(pollQueue, 3000);
+        setTimeout(pollQueue, 10000);
       }
-      setTimeout(pollQueue, 3000);
+      setTimeout(pollQueue, 10000);
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/intro.js/7.2.0/intro.min.js"></script>
@@ -2046,9 +2048,9 @@ function requireSuperAdmin(req, res, next) {
 
 async function requireCompanyActive(req, res, next) {
   if (req.user && req.user.role === "super_admin") return next();
-  const company = await db
-    .prepare("SELECT status, trial_ends_at, plan FROM companies WHERE id = ?")
-    .get(req.user.company_id);
+
+  // Reuse req.company already loaded by the session middleware — avoids a redundant DB query per request
+  const company = req.company;
   if (!company) {
     return res.status(402).send(renderBillingGate(req.user));
   }

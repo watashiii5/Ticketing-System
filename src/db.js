@@ -1,12 +1,19 @@
 require("dotenv").config();
 const { Pool } = require("pg");
+const { AsyncLocalStorage } = require("async_hooks");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
 
+// Transaction-scoped client storage (concurrency-safe replacement for pool.query mutation)
+const txStorage = new AsyncLocalStorage();
+
 const pool = new Pool({
   connectionString: process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
 // Convert SQLite ? placeholders to PostgreSQL $1, $2, ...
@@ -27,41 +34,59 @@ function convertPlaceholders(sql) {
   return finalSql;
 }
 
+// ── Prepared statement cache ─────────────────────────────────────────
+// Avoids re-converting the same SQL string on every db.prepare() call.
+const stmtCache = new Map();
+
+function getCachedSql(sql) {
+  let cached = stmtCache.get(sql);
+  if (!cached) {
+    cached = convertPlaceholders(sql);
+    stmtCache.set(sql, cached);
+  }
+  return cached;
+}
+
+// Helper: get the correct query executor (transaction client or pool)
+function getExecutor() {
+  const txClient = txStorage.getStore();
+  return txClient || pool;
+}
+
 // Compatibility wrapper that mimics the SQLite `db.prepare().run/get/all` interface
 // but uses PostgreSQL via the pg pool
 const db = {
   prepare(sql) {
-    const convertedSql = convertPlaceholders(sql);
-    const stmt = { sql: convertedSql, originalSql: sql };
+    const convertedSql = getCachedSql(sql);
     return {
       async run(...params) {
         try {
-          const result = await pool.query(stmt.sql, params);
+          const result = await getExecutor().query(convertedSql, params);
           const row = result.rows[0];
           return {
             lastInsertRowid: row ? row.id : null,
             changes: result.rowCount,
           };
         } catch (err) {
-          console.error("DB run error:", stmt.originalSql, params, err.message);
+          console.error("DB run error:", sql, params, err.message);
           throw err;
         }
       },
       async get(...params) {
         try {
-          const result = await pool.query(stmt.sql, params);
+          const result = await getExecutor().query(convertedSql, params);
           return result.rows[0] || null;
         } catch (err) {
-          console.error("DB get error:", stmt.originalSql, params, err.message);
+          console.error("DB get error:", sql, params, err.message);
           throw err;
         }
       },
       async all(...params) {
         try {
-          const result = await pool.query(stmt.sql, params);
+          const result = await getExecutor().query(convertedSql, params);
           return result.rows || [];
         } catch (err) {
-          console.error("DB all error:", stmt.originalSql, params, err.message);
+          console.error("DB all error:", sql, params, err.message);
           throw err;
         }
       },
@@ -70,7 +95,7 @@ const db = {
 
   async exec(sql) {
     try {
-      await pool.query(sql);
+      await getExecutor().query(sql);
     } catch (err) {
       console.error("DB exec error:", sql, err.message);
       throw err;
@@ -79,8 +104,8 @@ const db = {
 
   async query(sql, params = []) {
     try {
-      const convertedSql = convertPlaceholders(sql);
-      const result = await pool.query(convertedSql, params);
+      const convertedSql = getCachedSql(sql);
+      const result = await getExecutor().query(convertedSql, params);
       return result.rows;
     } catch (err) {
       console.error("DB query error:", sql, params, err.message);
@@ -88,22 +113,18 @@ const db = {
     }
   },
 
+  // Concurrency-safe transactions using AsyncLocalStorage.
+  // All db.prepare() calls inside `fn` automatically use the transaction client.
   transaction(fn) {
     return async function (...args) {
       const client = await pool.connect();
-      const originalQuery = pool.query;
       try {
         await client.query("BEGIN");
-        pool.query = (text, params) => client.query(text, params);
-        
-        const result = await fn(...args);
-        
+        const result = await txStorage.run(client, () => fn(...args));
         await client.query("COMMIT");
-        pool.query = originalQuery;
         return result;
       } catch (e) {
         await client.query("ROLLBACK");
-        pool.query = originalQuery;
         throw e;
       } finally {
         client.release();
@@ -270,6 +291,45 @@ async function initializeDatabase() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+
+    // ── Performance indexes ──────────────────────────────────────
+    // These are critical for query performance. Without them every query does a full table scan.
+    const indexes = [
+      // tickets — most queried table
+      "CREATE INDEX IF NOT EXISTS idx_tickets_company_id ON tickets(company_id)",
+      "CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id)",
+      "CREATE INDEX IF NOT EXISTS idx_tickets_assignee_id ON tickets(assignee_id)",
+      "CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)",
+      "CREATE INDEX IF NOT EXISTS idx_tickets_company_status ON tickets(company_id, status)",
+      "CREATE INDEX IF NOT EXISTS idx_tickets_company_created ON tickets(company_id, created_at DESC)",
+      // users
+      "CREATE INDEX IF NOT EXISTS idx_users_company_id ON users(company_id)",
+      "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)",
+      // credentials (unique indexes exist but explicit ones help JOIN perf)
+      "CREATE INDEX IF NOT EXISTS idx_credentials_email ON credentials(email)",
+      "CREATE INDEX IF NOT EXISTS idx_credentials_user_id ON credentials(user_id)",
+      // comments & attachments — always queried by ticket_id
+      "CREATE INDEX IF NOT EXISTS idx_comments_ticket_id ON comments(ticket_id)",
+      "CREATE INDEX IF NOT EXISTS idx_attachments_ticket_id ON attachments(ticket_id)",
+      // audit_logs
+      "CREATE INDEX IF NOT EXISTS idx_audit_logs_company_id ON audit_logs(company_id)",
+      "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)",
+      // sessions
+      "CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire)",
+      // invites & reset_tokens
+      "CREATE INDEX IF NOT EXISTS idx_invites_company_id ON invites(company_id)",
+      "CREATE INDEX IF NOT EXISTS idx_reset_tokens_user_id ON reset_tokens(user_id)",
+      "CREATE INDEX IF NOT EXISTS idx_reset_tokens_expires ON reset_tokens(expires_at)",
+      // payment_requests
+      "CREATE INDEX IF NOT EXISTS idx_payment_requests_company_id ON payment_requests(company_id)",
+      "CREATE INDEX IF NOT EXISTS idx_payment_requests_ref_method ON payment_requests(reference, method)",
+      // companies slug lookup
+      "CREATE INDEX IF NOT EXISTS idx_companies_slug ON companies(slug)",
+    ];
+
+    for (const ddl of indexes) {
+      await client.query(ddl);
+    }
 
     // ── Seed data ────────────────────────────────────────────────
     const companyResult = await client.query("SELECT COUNT(*)::int as count FROM companies");
